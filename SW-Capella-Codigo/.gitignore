@@ -1,0 +1,21 @@
+node_modules/
+.env
+.env.local
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+build/
+dist/
+.next/
+out/
+.git/
+*.xlsx.bak
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Excluir archivo problemático de la subida inicial
+iniciar.bat
+

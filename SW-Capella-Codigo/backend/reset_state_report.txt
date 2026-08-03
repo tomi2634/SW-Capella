@@ -1,0 +1,10 @@
+﻿clientes_count=0
+resumen_totalClientes=0
+resumen_totalAdeudado=0
+honorarios_items=0
+particulares_items=0
+counter_lastNumber=0
+index_json={
+
+}
+

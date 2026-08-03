@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Manual de Usuario - Capella</title>
+    <style>
+      :root {
+        --color-primary: #1d3e8a;
+        --color-accent: #3fb5e9;
+        --color-dark: #191919;
+        --color-neutral: #a5a692;
+        --color-white: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: var(--color-dark);
+        background: var(--color-white);
+        line-height: 1.5;
+      }
+
+      .wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 24px 18px 48px;
+      }
+
+      .hero {
+        background: linear-gradient(135deg, var(--color-dark) 0%, var(--color-primary) 65%, var(--color-accent) 100%);
+        color: var(--color-white);
+        border-radius: 10px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+
+      h2 {
+        margin: 26px 0 8px;
+        font-size: 20px;
+        color: var(--color-primary);
+        border-bottom: 2px solid rgba(165, 166, 146, 0.45);
+        padding-bottom: 6px;
+      }
+
+      p, li {
+        font-size: 15px;
+      }
+
+      ul {
+        margin-top: 8px;
+      }
+
+      .box {
+        border: 1px solid rgba(165, 166, 146, 0.6);
+        background: rgba(63, 181, 233, 0.08);
+        border-radius: 8px;
+        padding: 14px;
+        margin: 14px 0;
+      }
+
+      .warning {
+        border-left: 4px solid var(--color-primary);
+        background: rgba(29, 62, 138, 0.08);
+      }
+
+      strong {
+        color: var(--color-primary);
+      }
+
+      .small {
+        color: #555;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="hero">
+        <h1>Manual de Usuario</h1>
+        <p>Sistema de Gestión de Pagos - Estudio Contable Capella</p>
+      </header>
+
+      <section>
+        <h2>1. Objetivo del sistema</h2>
+        <p>
+          Esta web permite gestionar clientes, registrar pagos, calcular deuda pendiente y generar recibos en PDF.
+          Toda la información se actualiza en tiempo real entre los usuarios conectados.
+        </p>
+      </section>
+
+      <section>
+        <h2>2. Pestaña General</h2>
+        <ul>
+          <li>Visualiza métricas generales: clientes totales, deuda total y estado de pagos.</li>
+          <li>Muestra una tabla con clientes que tienen deuda pendiente.</li>
+          <li>Permite identificar rápidamente a quiénes hay que cobrar.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>3. Pestaña Clientes</h2>
+        <ul>
+          <li><strong>Nuevo Cliente:</strong> crea un cliente cargando nombre, teléfono, DNI/CUIT y honorario.</li>
+          <li><strong>Editar:</strong> modifica los datos de un cliente existente.</li>
+          <li><strong>Honorario Mensual:</strong> puedes actualizar el valor directamente en la tabla.</li>
+          <li><strong>Historial:</strong> abre el detalle de meses pagados/adeudados de cada cliente.</li>
+          <li><strong>Eliminar:</strong> borra cliente y datos asociados (acción irreversible).</li>
+        </ul>
+        <div class="box">
+          <strong>Campos obligatorios al crear cliente:</strong> Nombre, DNI/CUIT y Honorario.
+        </div>
+        <div class="box warning">
+          Recomendación: verifica bien los datos antes de eliminar un cliente, porque también se eliminan sus pagos e historial.
+        </div>
+      </section>
+
+      <section>
+        <h2>4. Pestaña Registrar Pago</h2>
+        <ul>
+          <li>Selecciona el cliente.</li>
+          <li>Ingresa el monto pagado.</li>
+          <li>Selecciona <strong>Tipo de pago</strong> (Cheque, Transferencia o Efectivo).</li>
+          <li>Completa <strong>Detalles</strong> (hasta 1000 caracteres) si deseas agregar observaciones.</li>
+          <li>Presiona <strong>Registrar Pago y Generar Recibo</strong>.</li>
+        </ul>
+        <div class="box">
+          Al registrar el pago, el sistema recalcula deuda automáticamente, guarda el recibo en la PC servidor y permite descargar una copia local opcional.
+        </div>
+      </section>
+
+      <section>
+        <h2>5. Recibo PDF</h2>
+        <p>El recibo generado incluye:</p>
+        <ul>
+          <li>Datos del cliente.</li>
+          <li>Monto total pagado.</li>
+          <li>Tipo de pago seleccionado.</li>
+          <li>Detalles ingresados al registrar el pago.</li>
+          <li>Fecha y hora de emisión.</li>
+          <li>Número de recibo correlativo (contador secuencial).</li>
+        </ul>
+        <div class="box">
+          Los recibos se guardan en la carpeta <strong>Trabajos Estudio Capella</strong>, con dos subcarpetas:
+          <strong>Honorarios Estudio Capella</strong> y <strong>Trabajos Particulares Estudio Capella</strong>.
+          Dentro de cada una se crea/usa una subcarpeta por cliente.
+          El nombre del archivo sigue el formato: <strong>Recibo N° + Cliente + Tipo de Pago</strong>.
+        </div>
+        <div class="box warning">
+          En la sección <strong>Recibos guardados</strong> de la pestaña Pagos puedes filtrar por cliente/fechas, descargar un recibo y usar <strong>Abrir carpeta</strong> (acción ejecutada en la PC servidor).
+        </div>
+      </section>
+
+      <section>
+        <h2>6. Preguntas Frecuentes (FAQ)</h2>
+        <div class="box">
+          <p><strong>¿Cómo crear un cliente mensual?</strong></p>
+          <ul>
+            <li>Ir a <strong>Clientes</strong> → <strong>+ Nuevo Cliente</strong>.</li>
+            <li>Completar datos y elegir <strong>Tipo de Trabajo: Honorarios Estudio Capella (mensual)</strong>.</li>
+            <li>Cargar el honorario mensual y guardar.</li>
+          </ul>
+        </div>
+
+        <div class="box">
+          <p><strong>¿Cómo crear un cliente único?</strong></p>
+          <ul>
+            <li>Ir a <strong>Clientes</strong> → <strong>+ Nuevo Cliente</strong>.</li>
+            <li>Elegir <strong>Tipo de Trabajo: Trabajo Particular Estudio Capella (único)</strong>.</li>
+            <li>Completar <strong>DNI/CUIT</strong> para que futuras operaciones reutilicen la misma carpeta.</li>
+            <li>Guardar cliente.</li>
+          </ul>
+        </div>
+
+        <div class="box">
+          <p><strong>¿Cómo generar un recibo PDF? ¿Qué cambio genera esto?</strong></p>
+          <ul>
+            <li>Ir a <strong>Registrar Pago</strong>, elegir cliente, monto, tipo de pago y presionar <strong>Registrar Pago y Generar Recibo</strong>.</li>
+            <li>Esto registra el pago, recalcula deuda y genera un PDF con número correlativo.</li>
+            <li>El PDF queda guardado en la PC servidor dentro de la carpeta del cliente.</li>
+          </ul>
+        </div>
+
+        <div class="box">
+          <p><strong>¿Cómo funciona la opción de Interés Mensual?</strong></p>
+          <ul>
+            <li>Es opcional y solo aplica a clientes <strong>mensuales</strong>.</li>
+            <li>Cuando se activa, al vencer cada ciclo de recargo (30 días) el sistema aplica el porcentaje configurado al honorario facturado de ese período.</li>
+            <li>En clientes de trabajo único no se aplica interés mensual.</li>
+          </ul>
+        </div>
+
+        <div class="box">
+          <p><strong>¿Cómo cambio la mensualidad de un cliente?</strong></p>
+          <ul>
+            <li>En <strong>Clientes</strong>, modificar el valor de <strong>Honorario Mensual</strong> en la tabla o desde <strong>Editar</strong>.</li>
+            <li>El sistema recalcula la deuda automáticamente según el estado de facturación del cliente.</li>
+          </ul>
+        </div>
+
+        <div class="box">
+          <p><strong>¿Cómo uso el filtro de recibos?</strong></p>
+          <ul>
+            <li>Ir a <strong>Registrar Pago</strong>, sección <strong>Recibos guardados</strong>.</li>
+            <li>Usar los filtros de <strong>Tipo de trabajo</strong>, <strong>Cliente</strong>, <strong>Cliente o DNI/CUIT</strong> y rango de fechas <strong>Desde / Hasta</strong>.</li>
+            <li>Presionar <strong>Buscar recibos</strong> para aplicar filtros.</li>
+            <li>Presionar <strong>Limpiar filtros</strong> para volver al listado general.</li>
+          </ul>
+        </div>
+
+        <div class="box warning">
+          <p><strong>Más consultas comunes</strong></p>
+          <ul>
+            <li><strong>¿Por qué un cliente particular desaparece de Gestión?</strong> Porque al quedar sin deuda, el sistema lo elimina automáticamente de la lista activa.</li>
+            <li><strong>¿Se pierden sus recibos?</strong> No. Los PDFs quedan guardados en su carpeta.</li>
+            <li><strong>¿Si vuelve el mismo cliente particular?</strong> Si se carga el mismo DNI/CUIT, reutiliza la misma carpeta histórica.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>7. Buenas prácticas</h2>
+        <ul>
+          <li>Registrar cada pago en el momento para mantener deuda y recibos consistentes.</li>
+          <li>Completar el campo Detalles cuando un pago necesite aclaraciones.</li>
+          <li>Realizar respaldo periódico de la carpeta central de recibos en la PC servidor.</li>
+        </ul>
+      </section>
+
+      <p class="small">Versión del manual: 05/03/2026</p>
+    </div>
+  </body>
+</html>
