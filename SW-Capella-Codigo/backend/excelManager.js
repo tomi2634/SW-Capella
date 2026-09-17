@@ -1,68 +1,17 @@
-const ExcelJS = require('exceljs');
 const path = require('path');
-const fs = require('fs');
+const { abrirDb, enTransaccion } = require('./db');
+const { filaACliente, filaAPago, filaAHistorial, parseJsonObjeto } = require('./mappers');
 
 class ExcelManager {
-  constructor() {
+  constructor(rutaDb) {
     this.dataPath = path.join(__dirname, '../data');
-    this.clientesPath = path.join(this.dataPath, 'clientes.xlsx');
-    this.pagosPath = path.join(this.dataPath, 'pagos.xlsx');
-    this.historicalPath = path.join(this.dataPath, 'historial.xlsx');
-    this._workbookCache = {
-      clientes: null,
-      pagos: null,
-      historial: null
-    };
-    this.CLIENTE_COL = {
-      id: 1,
-      nombre: 2,
-      telefono: 3,
-      honorario: 4,
-      honorarioPeriodo: 5,
-      totalAdeudado: 6,
-      proximaFacturacion: 7,
-      fechaCreacion: 8,
-      tipoTrabajo: 9,
-      interesMensualActivo: 10,
-      interesMensualPorcentaje: 11,
-      lastUpdate: 12,
-      dniCuit: 13,
-      honorariosProgramados: 14,
-      mesesAdeudados: 15
-    };
-    this.PAGO_COL = {
-      id: 1,
-      clienteId: 2,
-      monto: 3,
-      tipoPago: 4,
-      detalles: 5,
-      fecha: 6,
-      timestamp: 7,
-      numeroCheque: 8,
-      nombreBanco: 9,
-      estado: 10,
-      anuladoAt: 11,
-      anuladoMotivo: 12,
-      reciboRelativePath: 13,
-      reciboFileName: 14,
-      reciboNumero: 15
-    };
+    // rutaDb solo se pasa desde las pruebas, para trabajar en un temporal.
+    this.dbPath = rutaDb || path.join(this.dataPath, 'capella.db');
+    this.db = abrirDb(this.dbPath);
   }
 
   _safeJsonParseObject(rawValue, fallback = {}) {
-    if (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)) {
-      return rawValue;
-    }
-
-    try {
-      const parsed = JSON.parse((rawValue || '').toString());
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed;
-      }
-      return fallback;
-    } catch (_) {
-      return fallback;
-    }
+    return parseJsonObjeto(rawValue, fallback);
   }
 
   normalizeMonthKey(value) {
@@ -121,76 +70,6 @@ class ExcelManager {
     return parseFloat(cliente?.honorario) || 0;
   }
 
-  _invalidateWorkbookCache(cacheKey) {
-    this._workbookCache[cacheKey] = null;
-  }
-
-  async _loadWorkbookCache(cacheKey, filePath, sheetName, initFn) {
-    const cached = this._workbookCache[cacheKey];
-    if (cached?.workbook) {
-      return cached;
-    }
-
-    if (cached?.loading) {
-      return cached.loading;
-    }
-
-    const loading = (async () => {
-      if (!fs.existsSync(filePath)) {
-        if (typeof initFn === 'function') {
-          await initFn.call(this);
-        }
-      }
-
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.readFile(filePath);
-
-      let sheet = workbook.getWorksheet(sheetName);
-      if (!sheet) {
-        sheet = workbook.addWorksheet(sheetName);
-      }
-
-      const entry = { workbook, sheet };
-      this._workbookCache[cacheKey] = entry;
-      return entry;
-    })();
-
-    this._workbookCache[cacheKey] = { loading };
-    return loading;
-  }
-
-  async _getClientesWorkbook() {
-    return this._loadWorkbookCache('clientes', this.clientesPath, 'Clientes', this.initializeClientesFile);
-  }
-
-  async _getPagosWorkbook() {
-    return this._loadWorkbookCache('pagos', this.pagosPath, 'Pagos', this.initializePagosFile);
-  }
-
-  async _getHistorialWorkbook() {
-    return this._loadWorkbookCache('historial', this.historicalPath, 'Historial', this.initializeHistoricalFile);
-  }
-
-  getClientesColumns() {
-    return [
-      { header: 'ID', key: 'id', width: 40 },
-      { header: 'Nombre', key: 'nombre', width: 30 },
-      { header: 'Teléfono', key: 'telefono', width: 15 },
-      { header: 'Honorario Mensual', key: 'honorario', width: 18 },
-      { header: 'Honorario Período Actual', key: 'honorarioPeriodo', width: 22 },
-      { header: 'Total Adeudado', key: 'totalAdeudado', width: 18 },
-      { header: 'Próxima Facturación', key: 'proximaFacturacion', width: 20 },
-      { header: 'Fecha Creación', key: 'fechaCreacion', width: 20 },
-      { header: 'Tipo Trabajo', key: 'tipoTrabajo', width: 20 },
-      { header: 'Interés Mensual Activo', key: 'interesMensualActivo', width: 22 },
-      { header: 'Interés Mensual (%)', key: 'interesMensualPorcentaje', width: 20 },
-      { header: 'Fecha Última Actualización', key: 'lastUpdate', width: 25 },
-      { header: 'DNI/CUIT', key: 'dniCuit', width: 20 },
-      { header: 'Honorarios Programados (JSON)', key: 'honorariosProgramados', width: 45 },
-      { header: 'Meses Adeudados', key: 'mesesAdeudados', width: 18 }
-    ];
-  }
-
   parseBooleanValue(value) {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') return value === 1;
@@ -213,283 +92,21 @@ class ExcelManager {
     return Math.round(conInteres * 100) / 100;
   }
 
-  _buildClienteFromRow(row) {
-    const tipoTrabajo = row.getCell(this.CLIENTE_COL.tipoTrabajo).value || 'honorarios';
-    return {
-      id: row.getCell(this.CLIENTE_COL.id).value,
-      nombre: row.getCell(this.CLIENTE_COL.nombre).value,
-      telefono: row.getCell(this.CLIENTE_COL.telefono).value || '',
-      honorario: parseFloat(row.getCell(this.CLIENTE_COL.honorario).value) || 0,
-      honorarioPeriodo: parseFloat(row.getCell(this.CLIENTE_COL.honorarioPeriodo).value) || 0,
-      totalAdeudado: parseFloat(row.getCell(this.CLIENTE_COL.totalAdeudado).value) || 0,
-      proximaFacturacion: row.getCell(this.CLIENTE_COL.proximaFacturacion).value,
-      fechaCreacion: row.getCell(this.CLIENTE_COL.fechaCreacion).value,
-      tipoTrabajo,
-      interesMensualActivo: this.parseBooleanValue(row.getCell(this.CLIENTE_COL.interesMensualActivo).value),
-      interesMensualPorcentaje: parseFloat(row.getCell(this.CLIENTE_COL.interesMensualPorcentaje).value) || 0,
-      lastUpdate: row.getCell(this.CLIENTE_COL.lastUpdate).value,
-      dniCuit: row.getCell(this.CLIENTE_COL.dniCuit).value || '',
-      honorariosProgramados: this._safeJsonParseObject(row.getCell(this.CLIENTE_COL.honorariosProgramados).value, {}),
-        mesesAdeudados: parseInt(row.getCell(this.CLIENTE_COL.mesesAdeudados).value, 10) || 0
-    };
-  }
-
-  _buildPagoFromRow(row) {
-    const tipoPago = row.getCell(this.PAGO_COL.tipoPago).value || 'Efectivo';
-    const detalles = row.getCell(this.PAGO_COL.detalles).value || '';
-    const fecha = row.getCell(this.PAGO_COL.fecha).value;
-    const timestamp = row.getCell(this.PAGO_COL.timestamp).value;
-
-    // Compatibilidad con versiones anteriores que no tenían columnas nuevas.
-    const estadoRaw = row.getCell(this.PAGO_COL.estado).value;
-    const estado = this.normalizePaymentStatus(estadoRaw);
-
-    return {
-      id: row.getCell(this.PAGO_COL.id).value,
-      clienteId: row.getCell(this.PAGO_COL.clienteId).value,
-      monto: parseFloat(row.getCell(this.PAGO_COL.monto).value) || 0,
-      tipoPago,
-      detalles,
-      fecha,
-      timestamp,
-      numeroCheque: (row.getCell(this.PAGO_COL.numeroCheque).value || '').toString(),
-      nombreBanco: (row.getCell(this.PAGO_COL.nombreBanco).value || '').toString(),
-      estado,
-      anuladoAt: row.getCell(this.PAGO_COL.anuladoAt).value || '',
-      anuladoMotivo: (row.getCell(this.PAGO_COL.anuladoMotivo).value || '').toString(),
-      reciboRelativePath: (row.getCell(this.PAGO_COL.reciboRelativePath).value || '').toString(),
-      reciboFileName: (row.getCell(this.PAGO_COL.reciboFileName).value || '').toString(),
-      reciboNumero: row.getCell(this.PAGO_COL.reciboNumero).value || null
-    };
-  }
-
-  _ensureClientesSheetStructure(sheet) {
-    if (!sheet) return false;
-
-    const desiredColumns = this.getClientesColumns();
-    let changed = false;
-
-    if (sheet.columnCount < desiredColumns.length) {
-      changed = true;
-    }
-
-    sheet.columns = desiredColumns;
-
-    sheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
-
-      const tipoTrabajoCell = row.getCell(this.CLIENTE_COL.tipoTrabajo);
-      if (!tipoTrabajoCell.value) {
-        tipoTrabajoCell.value = 'honorarios';
-        changed = true;
-      }
-
-      const interesActivoCell = row.getCell(this.CLIENTE_COL.interesMensualActivo);
-      if (interesActivoCell.value === null || interesActivoCell.value === undefined || interesActivoCell.value === '') {
-        interesActivoCell.value = false;
-        changed = true;
-      }
-
-      const interesPorcentajeCell = row.getCell(this.CLIENTE_COL.interesMensualPorcentaje);
-      if (interesPorcentajeCell.value === null || interesPorcentajeCell.value === undefined || interesPorcentajeCell.value === '') {
-        interesPorcentajeCell.value = 0;
-        changed = true;
-      }
-
-      const lastUpdateCell = row.getCell(this.CLIENTE_COL.lastUpdate);
-      if (!lastUpdateCell.value) {
-        lastUpdateCell.value = new Date().toISOString();
-        changed = true;
-      }
-
-      const dniCuitCell = row.getCell(this.CLIENTE_COL.dniCuit);
-      if (dniCuitCell.value === null || dniCuitCell.value === undefined) {
-        dniCuitCell.value = '';
-        changed = true;
-      }
-
-      const honorariosProgramadosCell = row.getCell(this.CLIENTE_COL.honorariosProgramados);
-      if (honorariosProgramadosCell.value === null || honorariosProgramadosCell.value === undefined || honorariosProgramadosCell.value === '') {
-        honorariosProgramadosCell.value = '{}';
-        changed = true;
-      }
-        const mesesAdeudadosCell = row.getCell(this.CLIENTE_COL.mesesAdeudados);
-        if (mesesAdeudadosCell.value === null || mesesAdeudadosCell.value === undefined) {
-          mesesAdeudadosCell.value = 0;
-          changed = true;
-        }
-    });
-
-    return changed;
-  }
-
-  _ensurePagosSheetStructure(sheet) {
-    if (!sheet) return false;
-
-    const desiredColumns = [
-      { header: 'ID Pago', key: 'id', width: 40 },
-      { header: 'ID Cliente', key: 'clienteId', width: 40 },
-      { header: 'Monto Pagado', key: 'monto', width: 15 },
-      { header: 'Tipo de Pago', key: 'tipoPago', width: 20 },
-      { header: 'Detalles', key: 'detalles', width: 50 },
-      { header: 'Fecha del Pago', key: 'fecha', width: 15 },
-      { header: 'Timestamp', key: 'timestamp', width: 25 },
-      { header: 'Número Cheque', key: 'numeroCheque', width: 20 },
-      { header: 'Banco Cheque', key: 'nombreBanco', width: 22 },
-      { header: 'Estado', key: 'estado', width: 14 },
-      { header: 'Anulado At', key: 'anuladoAt', width: 24 },
-      { header: 'Motivo Anulación', key: 'anuladoMotivo', width: 35 },
-      { header: 'Recibo Relative Path', key: 'reciboRelativePath', width: 45 },
-      { header: 'Recibo File Name', key: 'reciboFileName', width: 45 },
-      { header: 'Recibo Número', key: 'reciboNumero', width: 18 }
-    ];
-
-    let changed = false;
-    if (sheet.columnCount < desiredColumns.length) {
-      changed = true;
-    }
-    sheet.columns = desiredColumns;
-
-    sheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
-
-      const estadoCell = row.getCell(this.PAGO_COL.estado);
-      if (!estadoCell.value) {
-        estadoCell.value = 'activo';
-        changed = true;
-      }
-
-      const numeroChequeCell = row.getCell(this.PAGO_COL.numeroCheque);
-      if (numeroChequeCell.value === null || numeroChequeCell.value === undefined) {
-        numeroChequeCell.value = '';
-        changed = true;
-      }
-
-      const bancoCell = row.getCell(this.PAGO_COL.nombreBanco);
-      if (bancoCell.value === null || bancoCell.value === undefined) {
-        bancoCell.value = '';
-        changed = true;
-      }
-
-      const anuladoAtCell = row.getCell(this.PAGO_COL.anuladoAt);
-      if (anuladoAtCell.value === null || anuladoAtCell.value === undefined) {
-        anuladoAtCell.value = '';
-        changed = true;
-      }
-
-      const anuladoMotivoCell = row.getCell(this.PAGO_COL.anuladoMotivo);
-      if (anuladoMotivoCell.value === null || anuladoMotivoCell.value === undefined) {
-        anuladoMotivoCell.value = '';
-        changed = true;
-      }
-
-      const reciboPathCell = row.getCell(this.PAGO_COL.reciboRelativePath);
-      if (reciboPathCell.value === null || reciboPathCell.value === undefined) {
-        reciboPathCell.value = '';
-        changed = true;
-      }
-
-      const reciboFileNameCell = row.getCell(this.PAGO_COL.reciboFileName);
-      if (reciboFileNameCell.value === null || reciboFileNameCell.value === undefined) {
-        reciboFileNameCell.value = '';
-        changed = true;
-      }
-    });
-
-    return changed;
-  }
-
-  // Inicializar archivos de Excel si no existen
   async initialize() {
-    try {
-      this._invalidateWorkbookCache('clientes');
-      this._invalidateWorkbookCache('pagos');
-      this._invalidateWorkbookCache('historial');
-
-      if (!fs.existsSync(this.dataPath)) {
-        fs.mkdirSync(this.dataPath, { recursive: true });
-        console.log('✓ Carpeta data creada');
-      }
-
-      if (!fs.existsSync(this.clientesPath)) {
-        await this.initializeClientesFile();
-      }
-
-      if (!fs.existsSync(this.pagosPath)) {
-        await this.initializePagosFile();
-      }
-
-      if (!fs.existsSync(this.historicalPath)) {
-        await this.initializeHistoricalFile();
-      }
-      
-      console.log('✓ Sistema de base de datos listo');
-    } catch (error) {
-      console.error('❌ Error inicializando:', error);
-    }
+    // El esquema se crea en abrirDb() desde el constructor. Este método se
+    // conserva porque runStartupInitialization() de server.js lo invoca.
+    console.log('✓ Sistema de base de datos listo');
   }
 
-  // Crear archivo de clientes
-  async initializeClientesFile() {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Clientes');
-
-    sheet.columns = this.getClientesColumns();
-
-    // Estilizar encabezado
-    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF366092' }
-    };
-
-    await workbook.xlsx.writeFile(this.clientesPath);
-    console.log('✓ Archivo clientes.xlsx creado');
+  async getClientes() {
+    const filas = this.db.prepare('SELECT * FROM clientes ORDER BY rowid').all();
+    return filas.map(filaACliente);
   }
 
-  // Crear archivo de pagos
-  async initializePagosFile() {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Pagos');
-
-    this._ensurePagosSheetStructure(sheet);
-
-    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF366092' }
-    };
-
-    await workbook.xlsx.writeFile(this.pagosPath);
-    console.log('✓ Archivo pagos.xlsx creado');
-  }
-
-  // Crear archivo de historial de facturación
-  async initializeHistoricalFile() {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Historial');
-
-    sheet.columns = [
-      { header: 'ID Registro', key: 'id', width: 40 },
-      { header: 'ID Cliente', key: 'clienteId', width: 40 },
-      { header: 'Nombre Cliente', key: 'nombreCliente', width: 30 },
-      { header: 'Mes', key: 'mes', width: 15 },
-      { header: 'Comisión Cobrada', key: 'comisión', width: 15 },
-      { header: 'Fecha de Cobro', key: 'fechaCobro', width: 15 },
-      { header: 'Timestamp', key: 'timestamp', width: 25 }
-    ];
-
-    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF366092' }
-    };
-
-    await workbook.xlsx.writeFile(this.historicalPath);
-    console.log('✓ Archivo historial.xlsx creado');
+  async getCliente(id) {
+    const fila = this.db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
+    // Devuelve undefined y no null: getCliente() antes usaba Array.find().
+    return fila ? filaACliente(fila) : undefined;
   }
 
   // Reiniciar todos los datos
@@ -531,45 +148,6 @@ class ExcelManager {
   }
 
   // ==================== CLIENTES ====================
-
-  async getClientes() {
-    try {
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      const structureChanged = this._ensureClientesSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.clientesPath);
-      }
-      
-      const clientes = [];
-      if (sheet) {
-        console.log(`📖 Leyendo ${sheet.rowCount} filas del archivo clientes.xlsx`);
-        sheet.eachRow((row, rowNumber) => {
-          if (rowNumber === 1) return; // Saltar encabezado
-          const id = row.getCell(this.CLIENTE_COL.id).value;
-          const nombre = row.getCell(this.CLIENTE_COL.nombre).value;
-          
-          // Solo incluir si tiene ID y nombre
-          if (id && nombre) {
-            const cliente = this._buildClienteFromRow(row);
-            clientes.push(cliente);
-            console.log(`  ✓ Cliente leído: ${nombre} - Deuda: $${cliente.totalAdeudado}`);
-          }
-        });
-      }
-      
-      console.log(`✅ ${clientes.length} clientes encontrados`);
-      
-      return clientes;
-    } catch (error) {
-      console.error('❌ Error leyendo clientes:', error.message);
-      return [];
-    }
-  }
-
-  async getCliente(id) {
-    const clientes = await this.getClientes();
-    return clientes.find(c => c.id === id);
-  }
 
   async addCliente(cliente) {
     try {

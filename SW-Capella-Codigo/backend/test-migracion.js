@@ -101,17 +101,37 @@ prueba('filaAHistorial devuelve la clave comision CON tilde', () => {
   assert.ok(!('comision' in entrada), 'no debe exponer la clave sin tilde');
 });
 
-// --- runner ---
-let fallos = 0;
-for (const { nombre, fn } of pruebas) {
-  try {
-    fn();
-    console.log(`  ok   ${nombre}`);
-  } catch (error) {
-    fallos++;
-    console.error(`  FALLA ${nombre}`);
-    console.error(`        ${error.message}`);
-  }
+const ExcelManager = require('./excelManager');
+
+function nuevoManager() {
+  return new ExcelManager(path.join(dirTemporal(), 'capella.db'));
 }
-console.log(`\n${pruebas.length - fallos}/${pruebas.length} pruebas pasaron`);
-process.exit(fallos > 0 ? 1 : 0);
+
+prueba('getClientes devuelve vacio en una base nueva', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  assert.deepStrictEqual(await em.getClientes(), []);
+});
+
+prueba('getCliente devuelve undefined si no existe', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  assert.strictEqual(await em.getCliente('no-existe'), undefined);
+});
+
+// --- runner ---
+(async () => {
+  let fallos = 0;
+  for (const { nombre, fn } of pruebas) {
+    try {
+      await fn();
+      console.log(`  ok   ${nombre}`);
+    } catch (error) {
+      fallos++;
+      console.error(`  FALLA ${nombre}`);
+      console.error(`        ${error.message}`);
+    }
+  }
+  console.log(`\n${pruebas.length - fallos}/${pruebas.length} pruebas pasaron`);
+  process.exit(fallos > 0 ? 1 : 0);
+})();
