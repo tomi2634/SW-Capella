@@ -422,6 +422,48 @@ prueba('updatePagoReciboMeta devuelve null si el pago no existe', async () => {
   );
 });
 
+prueba('addHistorialEntry no duplica el mismo mes', async () => {
+  const em = await managerConCliente();
+  const primera = await em.addHistorialEntry('c1', 'Cliente c1', '01-2025', 15000);
+  assert.strictEqual(primera.alreadyExists, undefined);
+  const segunda = await em.addHistorialEntry('c1', 'Cliente c1', '01-2025', 99999);
+  assert.strictEqual(segunda.alreadyExists, true);
+  assert.strictEqual((await em.getAllHistorial()).length, 1);
+});
+
+prueba('getAllHistorial expone la clave comision con tilde', async () => {
+  const em = await managerConCliente();
+  await em.addHistorialEntry('c1', 'Cliente c1', '01-2025', 15000);
+  const entrada = (await em.getAllHistorial())[0];
+  assert.strictEqual(entrada['comisión'], 15000);
+  assert.strictEqual(entrada.mes, '01-2025');
+});
+
+prueba('reiniciarTodosDatos deja las tres tablas vacias', async () => {
+  const em = await managerConCliente();
+  await em.addPago({ id: 'p1', clienteId: 'c1', monto: 100, estado: 'activo' });
+  await em.addHistorialEntry('c1', 'Cliente c1', '01-2025', 15000);
+  await em.reiniciarTodosDatos();
+  assert.deepStrictEqual(await em.getClientes(), []);
+  assert.deepStrictEqual(await em.getAllPagos(), []);
+  assert.deepStrictEqual(await em.getAllHistorial(), []);
+});
+
+prueba('getResumen suma solo la deuda de los clientes que deben', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Debe', honorario: 15000 });
+  await em.addCliente({ id: 'c2', nombre: 'Al dia', honorario: 15000 });
+  await em.envejecerCliente('c1', 100);
+  await em.recalculateClienteDeuda('c1');
+  await em.recalculateClienteDeuda('c2');
+
+  const resumen = await em.getResumen();
+  assert.strictEqual(resumen.totalClientes, 2);
+  assert.strictEqual(resumen.clientesConDeuda, 1);
+  assert.strictEqual(resumen.clientesPagoDia, 1);
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;

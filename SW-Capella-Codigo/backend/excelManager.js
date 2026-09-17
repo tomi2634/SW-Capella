@@ -111,40 +111,15 @@ class ExcelManager {
 
   // Reiniciar todos los datos
   async reiniciarTodosDatos() {
-    try {
-      console.log('🗑️ REINICIANDO TODOS LOS DATOS...');
-      
-      // Eliminar archivos
-      if (fs.existsSync(this.clientesPath)) {
-        fs.unlinkSync(this.clientesPath);
-        console.log('✓ Archivo clientes.xlsx eliminado');
-      }
-      
-      if (fs.existsSync(this.pagosPath)) {
-        fs.unlinkSync(this.pagosPath);
-        console.log('✓ Archivo pagos.xlsx eliminado');
-      }
-      
-      if (fs.existsSync(this.historicalPath)) {
-        fs.unlinkSync(this.historicalPath);
-        console.log('✓ Archivo historial.xlsx eliminado');
-      }
-
-      this._invalidateWorkbookCache('clientes');
-      this._invalidateWorkbookCache('pagos');
-      this._invalidateWorkbookCache('historial');
-      
-      // Reinicializar archivos vacíos
-      await this.initializeClientesFile();
-      await this.initializePagosFile();
-      await this.initializeHistoricalFile();
-      
-      console.log('✅ TODOS LOS DATOS REINICIADOS A CERO');
-      return { success: true, message: 'Todos los datos han sido reiniciados a cero' };
-    } catch (error) {
-      console.error('❌ Error reiniciando datos:', error);
-      throw error;
-    }
+    console.log('🗑️ REINICIANDO TODOS LOS DATOS...');
+    enTransaccion(this.db, () => {
+      // pagos e historial primero: las foreign keys apuntan a clientes.
+      this.db.prepare('DELETE FROM pagos').run();
+      this.db.prepare('DELETE FROM historial').run();
+      this.db.prepare('DELETE FROM clientes').run();
+    });
+    console.log('✅ TODOS LOS DATOS REINICIADOS A CERO');
+    return { success: true, message: 'Todos los datos han sido reiniciados a cero' };
   }
 
   // ==================== CLIENTES ====================
@@ -769,17 +744,7 @@ class ExcelManager {
   // Calcula la deuda actual dinámicamente basada en fecha de creación y pagos
   async calcularDeudaDinamica(clienteId) {
     try {
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      this._ensureClientesSheetStructure(sheet);
-
-      let cliente = null;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.CLIENTE_COL.id).value === clienteId) {
-          cliente = this._buildClienteFromRow(row);
-        }
-      });
-
+      const cliente = await this.getCliente(clienteId);
       if (!cliente) return 0;
       return await this._calcularDeudaCliente(cliente);
     } catch (error) {
@@ -792,44 +757,29 @@ class ExcelManager {
   // ==================== HISTORIAL ====================
 
   async addHistorialEntry(clienteId, nombreCliente, mesFacturado, honorario) {
-    try {
-      console.log(`📝 Agregando mes de facturación al historial para ${nombreCliente}: ${mesFacturado} - $${honorario}`);
-      
-      const { workbook, sheet } = await this._getHistorialWorkbook();
+    const yaExiste = this.db.prepare(
+      'SELECT 1 FROM historial WHERE clienteId = ? AND mes = ?'
+    ).get(clienteId, mesFacturado);
 
-      // Verificar si ya existe el registro para este cliente y mes
-      let mesYaRegistrado = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(2).value === clienteId && row.getCell(4).value === mesFacturado) {
-          mesYaRegistrado = true;
-        }
-      });
-
-      if (mesYaRegistrado) {
-        console.log(`⚠️ El mes ${mesFacturado} ya está registrado para este cliente`);
-        return { success: true, alreadyExists: true };
-      }
-      
-      const newRow = sheet.addRow([
-        `${clienteId}_${mesFacturado}`,  // ID único
-        clienteId,                       // ID Cliente
-        nombreCliente,                   // Nombre Cliente
-        mesFacturado,                    // Mes (formato MM-YYYY)
-        Math.round((parseFloat(honorario) || 0) * 100) / 100,    // Comisión a cobrar ese mes (es el honorario)
-        new Date().toISOString().split('T')[0], // Fecha de registro
-        new Date().toISOString()         // Timestamp
-      ]);
-
-      await workbook.xlsx.writeFile(this.historicalPath);
-      this._invalidateWorkbookCache('historial');
-      console.log(`✓ Mes ${mesFacturado} agregado al historial con monto $${honorario}`);
-      
-      return { success: true };
-    } catch (error) {
-      console.error('Error agregando al historial:', error);
-      throw error;
+    if (yaExiste) {
+      console.log(`⚠️ El mes ${mesFacturado} ya está registrado para este cliente`);
+      return { success: true, alreadyExists: true };
     }
+
+    this.db.prepare(`
+      INSERT INTO historial (id, clienteId, nombreCliente, mes, comision, fechaCobro, timestamp)
+      VALUES (:id, :clienteId, :nombreCliente, :mes, :comision, :fechaCobro, :timestamp)
+    `).run({
+      id: `${clienteId}_${mesFacturado}`,
+      clienteId,
+      nombreCliente,
+      mes: mesFacturado,
+      comision: Math.round((parseFloat(honorario) || 0) * 100) / 100,
+      fechaCobro: new Date().toISOString().split('T')[0],
+      timestamp: new Date().toISOString(),
+    });
+
+    return { success: true };
   }
 
   async getHistorialCliente(clienteId) {
@@ -855,28 +805,8 @@ class ExcelManager {
   }
 
   async getAllHistorial() {
-    try {
-      const { sheet } = await this._getHistorialWorkbook();
-
-      const historial = [];
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        historial.push({
-          id: row.getCell(1).value,
-          clienteId: row.getCell(2).value,
-          nombreCliente: row.getCell(3).value,
-          mes: row.getCell(4).value,
-          comisión: row.getCell(5).value,
-          fechaCobro: row.getCell(6).value,
-          timestamp: row.getCell(7).value
-        });
-      });
-
-      return historial;
-    } catch (error) {
-      console.error('Error obteniendo historial completo:', error);
-      return [];
-    }
+    const filas = this.db.prepare('SELECT * FROM historial ORDER BY rowid').all();
+    return filas.map(filaAHistorial);
   }
 
   // ==================== RESUMEN ====================
