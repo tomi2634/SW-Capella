@@ -270,6 +270,55 @@ prueba('addClienteDeudaAnterior retrocede el alta y rellena con 0', async () => 
   }
 });
 
+async function managerConCliente(id = 'c1') {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id, nombre: 'Cliente ' + id, honorario: 15000 });
+  return em;
+}
+
+prueba('addPago persiste y se recupera por cliente', async () => {
+  const em = await managerConCliente();
+  await em.addPago({
+    id: 'p1', clienteId: 'c1', monto: 15000, tipoPago: 'Efectivo',
+    detalles: 'Enero', fecha: '2025-01-15',
+    timestamp: '2025-01-15T10:00:00.000Z', estado: 'activo',
+  });
+  const pagos = await em.getPagosCliente('c1');
+  assert.strictEqual(pagos.length, 1);
+  assert.strictEqual(pagos[0].monto, 15000);
+  assert.strictEqual(pagos[0].estado, 'activo');
+  assert.strictEqual(pagos[0].detalles, 'Enero');
+});
+
+prueba('getPagosCliente no devuelve pagos de otros clientes', async () => {
+  const em = await managerConCliente('c1');
+  await em.addCliente({ id: 'c2', nombre: 'Dos', honorario: 9000 });
+  await em.addPago({ id: 'p1', clienteId: 'c1', monto: 100, estado: 'activo' });
+  await em.addPago({ id: 'p2', clienteId: 'c2', monto: 200, estado: 'activo' });
+  assert.strictEqual((await em.getPagosCliente('c1')).length, 1);
+  assert.strictEqual((await em.getAllPagos()).length, 2);
+});
+
+prueba('addPago rechaza un estado invalido', async () => {
+  const em = await managerConCliente();
+  await assert.rejects(() => em.addPago({
+    id: 'p1', clienteId: 'c1', monto: 100, estado: 'inventado',
+  }));
+});
+
+prueba('addPago rechaza un cliente inexistente', async () => {
+  const em = await managerConCliente();
+  await assert.rejects(() => em.addPago({
+    id: 'p1', clienteId: 'fantasma', monto: 100, estado: 'activo',
+  }), 'la foreign key debe rechazarlo');
+});
+
+prueba('getPagoById devuelve null si no existe', async () => {
+  const em = await managerConCliente();
+  assert.strictEqual(await em.getPagoById('no-existe'), null);
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;

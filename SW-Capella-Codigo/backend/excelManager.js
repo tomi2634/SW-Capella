@@ -347,99 +347,57 @@ class ExcelManager {
   // ==================== PAGOS ====================
 
   async addPago(pago) {
-    try {
-      console.log(`📝 Registrando pago: ${pago.id} - Cliente: ${pago.clienteId} - Monto: $${pago.monto}`);
-      
-      // Agregar a la hoja de pagos
-      const { workbook, sheet } = await this._getPagosWorkbook();
-      const structureChanged = this._ensurePagosSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.pagosPath);
-      }
-
-      // Usar array de valores en lugar de objeto (funciona mejor con ExcelJS)
-      const newRow = sheet.addRow([
-        pago.id,              // Columna 1: ID Pago
-        pago.clienteId,       // Columna 2: ID Cliente
-        parseFloat(pago.monto) || 0,  // Columna 3: Monto Pagado
-        pago.tipoPago || 'Efectivo',    // Columna 4: Tipo de Pago
-        (pago.detalles || '').toString().slice(0, 1000), // Columna 5: Detalles
-        pago.fecha,           // Columna 6: Fecha del Pago
-        pago.timestamp,       // Columna 7: Timestamp
-        (pago.numeroCheque || '').toString().slice(0, 80),
-        (pago.nombreBanco || '').toString().slice(0, 120),
-        this.normalizePaymentStatus(pago.estado),
-        '',
-        '',
-        '',
-        '',
-        null
-      ]);
-
-      console.log(`✏️ Fila de pago agregada`);
-
-      await workbook.xlsx.writeFile(this.pagosPath);
-      console.log(`💾 Pago guardado en archivo`);
-
-      return pago;
-    } catch (error) {
-      console.error('❌ Error agregando pago:', error);
-      throw error;
+    // No coercionar en silencio un estado inválido: el CHECK de la tabla
+    // no puede rechazar lo que normalizePaymentStatus ya "arregló" antes.
+    if (pago.estado !== undefined
+      && pago.estado !== 'activo'
+      && pago.estado !== 'anulado') {
+      throw new Error(`estado inválido: ${pago.estado}`);
     }
+
+    this.db.prepare(`
+      INSERT INTO pagos (
+        id, clienteId, monto, tipoPago, detalles, fecha, timestamp,
+        numeroCheque, nombreBanco, estado, anuladoAt, anuladoMotivo,
+        reciboRelativePath, reciboFileName, reciboNumero
+      ) VALUES (
+        :id, :clienteId, :monto, :tipoPago, :detalles, :fecha, :timestamp,
+        :numeroCheque, :nombreBanco, :estado, '', '', '', '', NULL
+      )
+    `).run({
+      id: pago.id,
+      clienteId: pago.clienteId,
+      monto: parseFloat(pago.monto) || 0,
+      tipoPago: pago.tipoPago || 'Efectivo',
+      detalles: (pago.detalles || '').toString().slice(0, 1000),
+      // node:sqlite no acepta bindear `undefined`: los campos opcionales
+      // que no vienen coercionados a string necesitan un null explícito.
+      fecha: pago.fecha ?? null,
+      timestamp: pago.timestamp ?? null,
+      numeroCheque: (pago.numeroCheque || '').toString().slice(0, 80),
+      nombreBanco: (pago.nombreBanco || '').toString().slice(0, 120),
+      estado: this.normalizePaymentStatus(pago.estado),
+    });
+
+    console.log(`✓ Pago registrado: ${pago.id} - $${pago.monto}`);
+    return pago;
   }
 
   async getPagosCliente(clienteId) {
-    try {
-      const { workbook, sheet } = await this._getPagosWorkbook();
-      const structureChanged = this._ensurePagosSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.pagosPath);
-      }
-
-      const pagos = [];
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(2).value === clienteId) {
-          pagos.push(this._buildPagoFromRow(row));
-        }
-      });
-
-      return pagos;
-    } catch (error) {
-      console.error('Error obteniendo pagos:', error);
-      return [];
-    }
+    const filas = this.db.prepare(
+      'SELECT * FROM pagos WHERE clienteId = ? ORDER BY rowid'
+    ).all(clienteId);
+    return filas.map(filaAPago);
   }
 
   async getAllPagos() {
-    try {
-      const { workbook, sheet } = await this._getPagosWorkbook();
-      const structureChanged = this._ensurePagosSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.pagosPath);
-      }
-
-      const pagos = [];
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        pagos.push(this._buildPagoFromRow(row));
-      });
-
-      return pagos;
-    } catch (error) {
-      console.error('Error obteniendo pagos:', error);
-      return [];
-    }
+    const filas = this.db.prepare('SELECT * FROM pagos ORDER BY rowid').all();
+    return filas.map(filaAPago);
   }
 
   async getPagoById(pagoId) {
-    try {
-      const pagos = await this.getAllPagos();
-      return pagos.find(p => p.id === pagoId) || null;
-    } catch (error) {
-      console.error('Error obteniendo pago por ID:', error);
-      return null;
-    }
+    const fila = this.db.prepare('SELECT * FROM pagos WHERE id = ?').get(pagoId);
+    return fila ? filaAPago(fila) : null;
   }
 
   async updatePagoReciboMeta(pagoId, reciboData) {
