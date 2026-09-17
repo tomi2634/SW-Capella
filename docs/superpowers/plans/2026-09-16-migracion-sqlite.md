@@ -22,6 +22,17 @@
 - **Idioma:** nombres de campo, mensajes de consola y comentarios en español, como el resto del proyecto.
 - **El contrato de salida de los mappers es sagrado.** `interesMensualActivo` booleano, `honorariosProgramados` objeto parseado, textos vacíos `''` y no `null`, `reciboNumero` con `|| null`, y la clave del historial es `comisión` **con tilde**.
 
+## Dos juegos de datos distintos — no confundirlos
+
+| | Dónde | Qué es | Qué se hace con ellos |
+|---|---|---|---|
+| **Datos de prueba** | `data/` en la máquina de desarrollo | Clientes y pagos inventados por el desarrollador | Sirven de **ensayo** del script de migración: se corre, se miran los 7 chequeos, y la `capella.db` resultante **se borra**. Nada de esto se conserva. |
+| **Datos reales** | `data/` en la PC del estudio | La contabilidad del Estudio Capella | Se migran **una sola vez**, en la Tarea 16, con los 7 chequeos en OK. Este es el único traspaso que cuenta. |
+
+Los `.xlsx` no están en el repositorio (están en `.gitignore`), así que un agente que solo tenga el repo no dispone de ninguno de los dos juegos. Las Tareas 1 a 11 no los necesitan: sus pruebas arman datos sintéticos en un directorio temporal.
+
+Cuando este plan dice "contra los datos reales del estudio", se refiere exclusivamente a la Tarea 16.
+
 ## Corrección al orden de fases del spec
 
 El spec lista las fases como 0) infra, 1) pagos, 2) clientes, 3) historial, 4) cierre.
@@ -2009,10 +2020,12 @@ if (require.main === module) {
 }
 ```
 
-- [ ] **Step 2: Probar el traspaso contra los `.xlsx` actuales**
+- [ ] **Step 2: Ensayar el traspaso**
+
+Este paso es un **ensayo**, no la migración de verdad. Se corre contra los datos de prueba de la máquina de desarrollo, o sin datos si no hay. La `capella.db` que salga se descarta.
 
 Run: `node backend/migrar-a-sqlite.js`
-Expected: imprime `✓ Backup previo: backups/pre-migracion-....zip`, los conteos leídos y `✓ Datos traspasados`. Si `data/` está vacío, imprime ceros sin error.
+Expected: imprime `✓ Backup previo: backups/pre-migracion-....zip`, los conteos leídos y `✓ Datos traspasados`. Si `data/` está vacío, imprime ceros sin error — eso también es un resultado válido y prueba que el script no se rompe con una base vacía.
 
 Confirmar que el ZIP existe: `ls -la backups/pre-migracion-*.zip`
 
@@ -2218,7 +2231,9 @@ if (require.main === module) {
 module.exports = { migrar, verificar, DB_PATH, REPORTE_PATH };
 ```
 
-- [ ] **Step 2: Correr la migración completa con verificación**
+- [ ] **Step 2: Ensayar la verificación completa**
+
+Otra vez: ensayo con los datos de prueba, la base resultante se descarta. Lo que se está probando acá es **el script**, no los datos.
 
 ```bash
 rm -f data/capella.db
@@ -2226,6 +2241,8 @@ node backend/migrar-a-sqlite.js
 ```
 
 Expected: imprime los 7 grupos de chequeos, todos `OK`, y `✓ Migración verificada.` Sale con código 0.
+
+Si no hay datos de prueba en `data/`, los chequeos pasan con cero elementos. Eso prueba que el script corre, pero **no** prueba que la verificación detecte diferencias: para eso está el Step 3, que es el que realmente importa.
 
 - [ ] **Step 3: Verificar que detecta una corrupción deliberada**
 
