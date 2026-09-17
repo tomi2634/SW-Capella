@@ -1,33 +1,18 @@
-const fs = require('fs');
-const path = require('path');
 const ExcelManager = require('./excelManager');
-
-function stampForFile(date = new Date()) {
-  return date.toISOString().replace(/[:.]/g, '-');
-}
 
 async function main() {
   const excelManager = new ExcelManager();
-  const dataDir = path.resolve(__dirname, '../data');
-  const historialPath = path.join(dataDir, 'historial.xlsx');
 
   try {
-    if (!fs.existsSync(dataDir)) {
-      throw new Error(`No existe la carpeta de datos: ${dataDir}`);
-    }
+    await excelManager.initialize();
 
-    if (fs.existsSync(historialPath)) {
-      const backupPath = path.join(dataDir, `historial.backup.${stampForFile()}.xlsx`);
-      fs.copyFileSync(historialPath, backupPath);
-      console.log(`Backup creado: ${backupPath}`);
-    }
-
-    if (fs.existsSync(historialPath)) {
-      fs.unlinkSync(historialPath);
-      console.log('Archivo historial.xlsx eliminado para reconstruccion limpia');
-    }
-
-    await excelManager.initializeHistoricalFile();
+    // Antes se hacía copia del .xlsx y se borraba el archivo. Ahora el backup
+    // del día ya cubre la base entera (ver createDataZipBackup en server.js),
+    // así que acá solo se vacía la tabla para reconstruirla limpia.
+    const { n: previas } = excelManager.db
+      .prepare('SELECT COUNT(*) n FROM historial').get();
+    excelManager.db.prepare('DELETE FROM historial').run();
+    console.log(`Historial vaciado para reconstruccion limpia (${previas} entradas previas)`);
 
     const clientes = await excelManager.getClientes();
     let clientesProcesados = 0;

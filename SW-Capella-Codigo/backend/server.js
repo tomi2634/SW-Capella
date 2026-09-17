@@ -50,6 +50,16 @@ const createDataZipBackup = async () => {
   const fileName = `data.backup.${stampForFile()}.zip`;
   const outputPath = path.join(BACKUPS_DIR, fileName);
 
+  // Copiar un SQLite mientras hay una escritura en vuelo puede producir una
+  // copia corrupta. VACUUM INTO genera un snapshot consistente sin bloquear.
+  const snapshotPath = path.join(DATA_DIR, '_backup_capella.db');
+  try {
+    await fs.promises.unlink(snapshotPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  excelManager.db.exec(`VACUUM INTO '${snapshotPath.replace(/'/g, "''")}'`);
+
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
@@ -62,6 +72,12 @@ const createDataZipBackup = async () => {
     archive.directory(DATA_DIR, 'data');
     archive.finalize();
   });
+
+  try {
+    await fs.promises.unlink(snapshotPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
 
   const stats = await fs.promises.stat(outputPath);
 
@@ -904,7 +920,9 @@ app.post('/api/pagos', async (req, res) => {
 
     console.log(`💳 Registrando pago: Cliente=${clienteId}, Monto=$${monto}`);
 
-    const pago = await excelManager.addPago({
+    // El alta del pago y el recálculo van juntos: si el proceso muere entre
+    // medio, no puede quedar un pago guardado con la deuda sin actualizar.
+    const pago = await excelManager.registrarPagoYRecalcular({
       id: uuidv4(),
       clienteId,
       monto: montoNormalizado,
@@ -917,12 +935,7 @@ app.post('/api/pagos', async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    console.log(`✅ Pago registrado`);
-
-    // Recalcular la deuda del cliente después de agregar el pago
-    // Esto automáticamente agrega los meses al historial
-    await excelManager.recalculateClienteDeuda(clienteId);
-    console.log(`✅ Deuda del cliente ${clienteId} recalculada y historial actualizado`);
+    console.log(`✅ Pago registrado y deuda del cliente ${clienteId} recalculada`);
 
     // Retornar el cliente actualizado con la deuda recalculada
     const clienteActualizado = await excelManager.getCliente(clienteId);
