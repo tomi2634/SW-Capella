@@ -1,6 +1,8 @@
 # Documentacion interna que no se publica en GitHub.
 CONTEXTO_PROYECTO_IA.md
-docs/runbook-cutover-sqlite.md
+
+# docs/runbook-cutover-sqlite.md SI se versiona: es el procedimiento del
+# cutover y tiene que poder descargarse en la PC del estudio.
 
 # Herramientas locales del entorno de desarrollo.
 .claude/

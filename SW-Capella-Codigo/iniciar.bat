@@ -67,18 +67,21 @@ if not exist "frontend\node_modules" (
 )
 
 REM --- Arrancar ---
-REM  Las ventanas quedan visibles y minimizadas a proposito: si algo
-REM  falla, el error se puede leer. Para ocultarlas por completo,
-REM  cambia /min por /b en las dos lineas de abajo.
+REM  Los dos servidores arrancan en ventanas OCULTAS, via PowerShell
+REM  Start-Process -WindowStyle Hidden. No se usa "start /b" porque eso
+REM  los ata a esta consola y mueren cuando se cierra.
+REM
+REM  Como no hay ventanas que cerrar, el sistema se detiene con
+REM  detener.bat, que esta en esta misma carpeta.
 echo.
 echo   Iniciando backend en el puerto 5000...
-start "Capella - Backend" /min cmd /c "cd /d "%~dp0backend" && npm start"
+powershell -NoProfile -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','npm start' -WorkingDirectory '%~dp0backend' -WindowStyle Hidden"
 
 REM  Darle unos segundos al backend antes de levantar el frontend.
 timeout /t 4 /nobreak >nul
 
 echo   Iniciando frontend en el puerto 3000...
-start "Capella - Frontend" /min cmd /c "cd /d "%~dp0frontend" && npm start"
+powershell -NoProfile -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','npm start' -WorkingDirectory '%~dp0frontend' -WindowStyle Hidden"
 
 echo.
 echo   Listo. El navegador se abre solo en unos segundos.
@@ -86,8 +89,8 @@ echo.
 echo   Si no se abre: http://localhost:3000
 echo   Desde otra PC de la red: http://^<ip-de-esta-pc^>:3000
 echo.
-echo   Para cerrar el sistema, cerra las dos ventanas
-echo   "Capella - Backend" y "Capella - Frontend".
+echo   El sistema corre en segundo plano, sin ventanas visibles.
+echo   Para detenerlo, ejecuta detener.bat en esta misma carpeta.
 echo.
 
 timeout /t 6 /nobreak >nul
