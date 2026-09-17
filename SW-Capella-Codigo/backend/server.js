@@ -50,6 +50,16 @@ const createDataZipBackup = async () => {
   const fileName = `data.backup.${stampForFile()}.zip`;
   const outputPath = path.join(BACKUPS_DIR, fileName);
 
+  // Copiar un SQLite mientras hay una escritura en vuelo puede producir una
+  // copia corrupta. VACUUM INTO genera un snapshot consistente sin bloquear.
+  const snapshotPath = path.join(DATA_DIR, '_backup_capella.db');
+  try {
+    await fs.promises.unlink(snapshotPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  excelManager.db.exec(`VACUUM INTO '${snapshotPath.replace(/'/g, "''")}'`);
+
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
@@ -62,6 +72,12 @@ const createDataZipBackup = async () => {
     archive.directory(DATA_DIR, 'data');
     archive.finalize();
   });
+
+  try {
+    await fs.promises.unlink(snapshotPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
 
   const stats = await fs.promises.stat(outputPath);
 
