@@ -487,94 +487,85 @@ class ExcelManager {
 
   // Recalcular deuda del cliente basado en facturación cada 30 días
   async recalculateClienteDeuda(clienteId) {
-    try {
-      const cliente = await this.getCliente(clienteId);
-      if (!cliente) return;
+    const cliente = await this.getCliente(clienteId);
+    if (!cliente) return;
 
+    const tipoTrabajo = cliente.tipoTrabajo === 'particular' ? 'particular' : 'honorarios';
+    const interesMensualActivo = Boolean(cliente.interesMensualActivo);
+    const interesMensualPorcentaje = Number(cliente.interesMensualPorcentaje) || 0;
+
+    if (tipoTrabajo === 'particular') {
       const pagos = await this.getPagosCliente(clienteId);
-      const pagosActivos = pagos.filter((p) => this.normalizePaymentStatus(p.estado) !== 'anulado');
-      const totalPagado = pagosActivos.reduce((sum, p) => sum + (parseFloat(p.monto) || 0), 0);
-      const tipoTrabajo = cliente.tipoTrabajo === 'particular' ? 'particular' : 'honorarios';
-      const interesMensualActivo = Boolean(cliente.interesMensualActivo);
-      const interesMensualPorcentaje = Number(cliente.interesMensualPorcentaje) || 0;
+      const totalPagado = pagos
+        .filter((p) => this.normalizePaymentStatus(p.estado) !== 'anulado')
+        .reduce((suma, p) => suma + (parseFloat(p.monto) || 0), 0);
+      const deudaUnica = Math.round(((cliente.honorario || 0) - totalPagado) * 100) / 100;
 
-      if (tipoTrabajo === 'particular') {
-        const deudaUnica = Math.round(((cliente.honorario || 0) - totalPagado) * 100) / 100;
-        const mesesAdeudados = deudaUnica > 0 ? 1 : 0;
-
-        const { workbook, sheet } = await this._getClientesWorkbook();
-        const structureChanged = this._ensureClientesSheetStructure(sheet);
-
-        sheet.eachRow((row, rowNumber) => {
-          if (rowNumber === 1) return;
-          if (row.getCell(this.CLIENTE_COL.id).value === clienteId) {
-            row.getCell(this.CLIENTE_COL.honorario).value = cliente.honorario;
-            row.getCell(this.CLIENTE_COL.honorarioPeriodo).value = cliente.honorario;
-            row.getCell(this.CLIENTE_COL.totalAdeudado).value = deudaUnica;
-            row.getCell(this.CLIENTE_COL.mesesAdeudados).value = mesesAdeudados;
-            row.getCell(this.CLIENTE_COL.proximaFacturacion).value = '';
-            row.getCell(this.CLIENTE_COL.tipoTrabajo).value = 'particular';
-            row.getCell(this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
-          }
-        });
-
-        await workbook.xlsx.writeFile(this.clientesPath);
-        if (structureChanged) {
-          console.log('ℹ️ Estructura de clientes actualizada a versión con tipo de trabajo e interés mensual');
-        }
-        return;
-      }
-
-      // Centralizar la deuda en la misma regla usada por historial/resumen:
-      // para honorarios solo se adeudan meses ya vencidos (sin incluir el mes en curso).
-      const finanzas = await this._calcularFinanzasCliente(cliente);
-      const deudaFinal = Math.round((finanzas.deuda || 0) * 100) / 100;
-      const mesesAdeudados = (finanzas.historial || []).filter((entry) => {
-        return (parseFloat(entry.deudaPendiente) || 0) > 0;
-      }).length;
-
-      const honorarioMesActual = this._getHonorarioBaseMes(cliente, this.getCurrentMonthKey());
-      const nuevoHonorarioPeriodo = this._calcularHonorarioConInteres(
-        honorarioMesActual,
-        interesMensualActivo,
-        interesMensualPorcentaje
-      );
-
-      const ahora = new Date();
-      const nextBilling = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 1);
-
-      console.log(`📊 Cliente: ${cliente.nombre}`);
-      console.log(`   - Honorario Mensual Actual: $${cliente.honorario}`);
-      if (interesMensualActivo) {
-        console.log(`   - Interés mensual activo: ${interesMensualPorcentaje}%`);
-      }
-      console.log(`   - Total pagado: $${totalPagado}`);
-      console.log(`   - Deuda final (mes vencido): $${deudaFinal}`);
-      console.log(`   - Próxima facturación prevista: ${nextBilling.toISOString().split('T')[0]}`);
-
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      this._ensureClientesSheetStructure(sheet);
-
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.CLIENTE_COL.id).value === clienteId) {
-          row.getCell(this.CLIENTE_COL.honorario).value = cliente.honorario;
-          row.getCell(this.CLIENTE_COL.honorarioPeriodo).value = nuevoHonorarioPeriodo;
-          row.getCell(this.CLIENTE_COL.totalAdeudado).value = deudaFinal;
-          row.getCell(this.CLIENTE_COL.mesesAdeudados).value = mesesAdeudados;
-          row.getCell(this.CLIENTE_COL.proximaFacturacion).value = nextBilling.toISOString();
-          row.getCell(this.CLIENTE_COL.tipoTrabajo).value = 'honorarios';
-          row.getCell(this.CLIENTE_COL.interesMensualActivo).value = interesMensualActivo;
-          row.getCell(this.CLIENTE_COL.interesMensualPorcentaje).value = interesMensualPorcentaje;
-          row.getCell(this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
-        }
+      this.db.prepare(`
+        UPDATE clientes SET
+          honorarioPeriodo = :honorario, totalAdeudado = :deuda,
+          mesesAdeudados = :meses, proximaFacturacion = '',
+          tipoTrabajo = 'particular', lastUpdate = :lastUpdate
+        WHERE id = :id
+      `).run({
+        id: clienteId,
+        honorario: cliente.honorario,
+        deuda: deudaUnica,
+        meses: deudaUnica > 0 ? 1 : 0,
+        lastUpdate: new Date().toISOString(),
       });
+      return;
+    }
 
-      await workbook.xlsx.writeFile(this.clientesPath);
-      this._invalidateWorkbookCache('clientes');
-      console.log(`✅ Deuda recalculada para ${cliente.nombre}`);
+    // Honorarios: la misma regla de mes vencido que usan historial y resumen.
+    const finanzas = await this._calcularFinanzasCliente(cliente);
+    const deudaFinal = Math.round((finanzas.deuda || 0) * 100) / 100;
+    const mesesAdeudados = (finanzas.historial || [])
+      .filter((entrada) => (parseFloat(entrada.deudaPendiente) || 0) > 0).length;
+
+    const honorarioMesActual = this._getHonorarioBaseMes(cliente, this.getCurrentMonthKey());
+    const nuevoHonorarioPeriodo = this._calcularHonorarioConInteres(
+      honorarioMesActual, interesMensualActivo, interesMensualPorcentaje
+    );
+
+    const ahora = new Date();
+    const nextBilling = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 1);
+
+    this.db.prepare(`
+      UPDATE clientes SET
+        honorarioPeriodo = :honorarioPeriodo, totalAdeudado = :deuda,
+        mesesAdeudados = :meses, proximaFacturacion = :proxima,
+        tipoTrabajo = 'honorarios', interesMensualActivo = :interesActivo,
+        interesMensualPorcentaje = :interesPorcentaje, lastUpdate = :lastUpdate
+      WHERE id = :id
+    `).run({
+      id: clienteId,
+      honorarioPeriodo: nuevoHonorarioPeriodo,
+      deuda: deudaFinal,
+      meses: mesesAdeudados,
+      proxima: nextBilling.toISOString(),
+      interesActivo: interesMensualActivo ? 1 : 0,
+      interesPorcentaje: interesMensualPorcentaje,
+      lastUpdate: new Date().toISOString(),
+    });
+
+    console.log(`✅ Deuda recalculada para ${cliente.nombre}: $${deudaFinal}`);
+  }
+
+  // Alta de pago y recálculo como una sola unidad atómica. BEGIN/COMMIT/ROLLBACK
+  // manuales (no enTransaccion, que solo soporta un callback síncrono): acá
+  // hace falta `await` tanto el INSERT del pago como el recálculo async antes
+  // de cerrar la transacción, para que ambos se reviertan juntos si algo falla.
+  async registrarPagoYRecalcular(pago) {
+    this.db.exec('BEGIN');
+    try {
+      const resultado = await this.addPago(pago);
+      await this.recalculateClienteDeuda(pago.clienteId);
+      this.db.exec('COMMIT');
+      return resultado;
     } catch (error) {
-      console.error('Error recalculando deuda:', error);
+      this.db.exec('ROLLBACK');
+      throw error;
     }
   }
 

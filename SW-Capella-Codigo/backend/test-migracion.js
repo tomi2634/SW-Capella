@@ -319,6 +319,64 @@ prueba('getPagoById devuelve null si no existe', async () => {
   assert.strictEqual(await em.getPagoById('no-existe'), null);
 });
 
+prueba('recalculateClienteDeuda descuenta los pagos activos', async () => {
+  const em = await managerConCliente();
+  await em.envejecerCliente('c1', 100);          // ~3 meses vencidos
+  await em.recalculateClienteDeuda('c1');
+  const deudaSinPagos = (await em.getCliente('c1')).totalAdeudado;
+  assert.ok(deudaSinPagos > 0, 'con meses vencidos debe haber deuda');
+
+  await em.addPago({ id: 'p1', clienteId: 'c1', monto: 15000, estado: 'activo' });
+  await em.recalculateClienteDeuda('c1');
+  assert.strictEqual(
+    (await em.getCliente('c1')).totalAdeudado,
+    Math.round((deudaSinPagos - 15000) * 100) / 100
+  );
+});
+
+prueba('un pago anulado NO reduce la deuda', async () => {
+  const em = await managerConCliente();
+  await em.envejecerCliente('c1', 100);
+  await em.recalculateClienteDeuda('c1');
+  const deudaBase = (await em.getCliente('c1')).totalAdeudado;
+
+  await em.addPago({ id: 'p1', clienteId: 'c1', monto: 15000, estado: 'anulado' });
+  await em.recalculateClienteDeuda('c1');
+  assert.strictEqual((await em.getCliente('c1')).totalAdeudado, deudaBase);
+});
+
+prueba('un cliente particular no factura por mes', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({
+    id: 'c1', nombre: 'Trabajo unico', honorario: 50000, tipoTrabajo: 'particular',
+  });
+  await em.envejecerCliente('c1', 400);          // 13 meses: no debe importar
+  await em.recalculateClienteDeuda('c1');
+  assert.strictEqual((await em.getCliente('c1')).totalAdeudado, 50000,
+    'el particular adeuda su honorario unico, no 13 meses');
+});
+
+prueba('el mes en curso no se adeuda', async () => {
+  const em = await managerConCliente();
+  await em.envejecerCliente('c1', 5);            // creado hace 5 dias
+  await em.recalculateClienteDeuda('c1');
+  assert.strictEqual((await em.getCliente('c1')).totalAdeudado, 0,
+    'cobro a mes vencido: el mes en curso todavia no se debe');
+});
+
+prueba('registrarPagoYRecalcular revierte todo si el recalculo falla', async () => {
+  const em = await managerConCliente();
+  const original = em._calcularFinanzasCliente.bind(em);
+  em._calcularFinanzasCliente = async () => { throw new Error('falla simulada'); };
+  await assert.rejects(() => em.registrarPagoYRecalcular({
+    id: 'p1', clienteId: 'c1', monto: 15000, estado: 'activo',
+  }));
+  em._calcularFinanzasCliente = original;
+  assert.strictEqual((await em.getAllPagos()).length, 0,
+    'el pago no debe haber quedado guardado');
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;

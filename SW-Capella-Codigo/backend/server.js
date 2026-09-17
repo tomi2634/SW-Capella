@@ -904,7 +904,9 @@ app.post('/api/pagos', async (req, res) => {
 
     console.log(`💳 Registrando pago: Cliente=${clienteId}, Monto=$${monto}`);
 
-    const pago = await excelManager.addPago({
+    // El alta del pago y el recálculo van juntos: si el proceso muere entre
+    // medio, no puede quedar un pago guardado con la deuda sin actualizar.
+    const pago = await excelManager.registrarPagoYRecalcular({
       id: uuidv4(),
       clienteId,
       monto: montoNormalizado,
@@ -917,12 +919,7 @@ app.post('/api/pagos', async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    console.log(`✅ Pago registrado`);
-
-    // Recalcular la deuda del cliente después de agregar el pago
-    // Esto automáticamente agrega los meses al historial
-    await excelManager.recalculateClienteDeuda(clienteId);
-    console.log(`✅ Deuda del cliente ${clienteId} recalculada y historial actualizado`);
+    console.log(`✅ Pago registrado y deuda del cliente ${clienteId} recalculada`);
 
     // Retornar el cliente actualizado con la deuda recalculada
     const clienteActualizado = await excelManager.getCliente(clienteId);
