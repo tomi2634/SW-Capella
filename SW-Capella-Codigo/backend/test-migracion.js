@@ -119,6 +119,37 @@ prueba('getCliente devuelve undefined si no existe', async () => {
   assert.strictEqual(await em.getCliente('no-existe'), undefined);
 });
 
+prueba('addCliente persiste y devuelve el cliente con id', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  const creado = await em.addCliente({
+    id: 'c1', nombre: 'Estudio Uno', telefono: '2625000000',
+    honorario: 15000, tipoTrabajo: 'honorarios', dniCuit: '20111111119',
+  });
+  assert.strictEqual(creado.id, 'c1');
+  const leido = await em.getCliente('c1');
+  assert.strictEqual(leido.nombre, 'Estudio Uno');
+  assert.strictEqual(leido.honorario, 15000);
+  assert.strictEqual(leido.tipoTrabajo, 'honorarios');
+  assert.deepStrictEqual(leido.honorariosProgramados, {});
+});
+
+prueba('addCliente rechaza un tipoTrabajo invalido', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await assert.rejects(() => em.addCliente({
+    id: 'c2', nombre: 'Malo', honorario: 0, tipoTrabajo: 'inventado',
+  }));
+});
+
+prueba('addCliente no tarda 200ms artificiales', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  const t0 = Date.now();
+  await em.addCliente({ id: 'c3', nombre: 'Rapido', honorario: 1000 });
+  assert.ok(Date.now() - t0 < 100, 'el sleep de verificacion debe haber desaparecido');
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;

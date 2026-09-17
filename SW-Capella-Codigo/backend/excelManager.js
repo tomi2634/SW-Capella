@@ -150,103 +150,55 @@ class ExcelManager {
   // ==================== CLIENTES ====================
 
   async addCliente(cliente) {
-    try {
-      console.log('📝 INICIO: Agregando cliente:', cliente.nombre);
-      
-      // Asegurar que el archivo existe
-      if (!fs.existsSync(this.clientesPath)) {
-        console.log('⚠ Archivo no existe, creando...');
-        await this.initializeClientesFile();
-        await new Promise(resolve => setTimeout(resolve, 200));
-        this._invalidateWorkbookCache('clientes');
-      }
-
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      const structureChanged = this._ensureClientesSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.clientesPath);
-      }
-
-      console.log(`📊 Sheet tiene ${sheet.rowCount} filas actualmente`);
-
-      // Agregar nueva fila usando valores en array (orden de columnas)
-      // Cobro a mes vencido: el primer vencimiento es al inicio del mes siguiente.
-      const now = new Date();
-      const proximaFacturacion = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      
-      const fechaCreacion = new Date().toISOString();
-      const tipoTrabajo = cliente.tipoTrabajo === 'particular' ? 'particular' : 'honorarios';
-      const interesMensualActivo = Boolean(cliente.interesMensualActivo);
-      const interesMensualPorcentaje = Number(cliente.interesMensualPorcentaje) || 0;
-      const dniCuit = (cliente.dniCuit || '').toString().trim().slice(0, 40);
-      const honorarioBase = parseInt(cliente.honorario, 10) || 0;
-      const honorarioInicialPeriodo = tipoTrabajo === 'honorarios'
-        ? 0
-        : honorarioBase;
-      
-      const newRow = sheet.addRow([
-        cliente.id,
-        cliente.nombre,
-        cliente.telefono || '',
-        honorarioBase,
-        honorarioInicialPeriodo,
-        honorarioInicialPeriodo,
-        tipoTrabajo === 'honorarios' ? proximaFacturacion.toISOString() : '',
-        fechaCreacion,
-        tipoTrabajo,
-        interesMensualActivo,
-        interesMensualPorcentaje,
-        new Date().toISOString(),
-        dniCuit,
-        '{}',
-        0
-      ]);
-      
-      console.log(`✏️ Fila agregada con valores`);
-      console.log(`   - ID: ${cliente.id}`);
-      console.log(`   - Nombre: ${cliente.nombre}`);
-      console.log(`   - Tipo de trabajo: ${tipoTrabajo}`);
-      console.log(`   - Honorario: $${honorarioBase}`);
-      console.log(`   - Total Adeudado (inicial): $${honorarioInicialPeriodo}`);
-      if (tipoTrabajo === 'honorarios') {
-        console.log(`   - Próxima Facturación: ${proximaFacturacion.toISOString()}`);
-      }
-
-      // Guardar archivo con reintentos
-      let writeSuccess = false;
-      for (let i = 0; i < 3; i++) {
-        try {
-          console.log(`💾 Guardando archivo (intento ${i + 1}/3)...`);
-          await workbook.xlsx.writeFile(this.clientesPath);
-          writeSuccess = true;
-          console.log('✓ Archivo guardado correctamente');
-          break;
-        } catch (err) {
-          console.log(`❌ Error en guardado: ${err.message}`);
-          if (i < 2) await new Promise(r => setTimeout(r, 300));
-        }
-      }
-      
-      if (!writeSuccess) throw new Error('No se pudo guardar el archivo después de 3 intentos');
-
-      // Verificar que se guardó
-      console.log('🔍 Verificando que se guardó correctamente...');
-      await new Promise(r => setTimeout(r, 200));
-      
-      const { sheet: verifySheet } = await this._getClientesWorkbook();
-      console.log(`✅ Verificación: ${verifySheet.rowCount} filas en archivo`);
-      
-      // Verificar que la última fila tiene el cliente
-      const lastRow = verifySheet.getRow(verifySheet.rowCount);
-      const nombreGuardado = lastRow.getCell(2).value;
-      console.log(`✅ Última fila - Nombre: "${nombreGuardado}"`);
-      
-      console.log('✅ EXITO: Cliente agregado completamente');
-      return cliente;
-    } catch (error) {
-      console.error('❌ ERROR FINAL:', error.message);
-      throw error;
+    const ahora = new Date();
+    // No coercionar en silencio un tipoTrabajo inválido: el CHECK de la
+    // tabla no puede rechazar lo que el código ya "arregló" antes del INSERT.
+    if (cliente.tipoTrabajo !== undefined
+      && cliente.tipoTrabajo !== 'honorarios'
+      && cliente.tipoTrabajo !== 'particular') {
+      throw new Error(`tipoTrabajo inválido: ${cliente.tipoTrabajo}`);
     }
+    const tipoTrabajo = cliente.tipoTrabajo === 'particular' ? 'particular' : 'honorarios';
+    const honorario = Math.round((parseFloat(cliente.honorario) || 0) * 100) / 100;
+    // Cobro a mes vencido: el primer vencimiento es al inicio del mes siguiente.
+    const proximaFacturacion = tipoTrabajo === 'particular'
+      ? ''
+      : new Date(ahora.getFullYear(), ahora.getMonth() + 1, 1).toISOString();
+
+    const nuevo = {
+      id: cliente.id,
+      nombre: cliente.nombre,
+      telefono: (cliente.telefono || '').toString(),
+      honorario,
+      honorarioPeriodo: honorario,
+      totalAdeudado: 0,
+      proximaFacturacion,
+      fechaCreacion: ahora.toISOString(),
+      tipoTrabajo,
+      interesMensualActivo: cliente.interesMensualActivo ? 1 : 0,
+      interesMensualPorcentaje: Number(cliente.interesMensualPorcentaje) || 0,
+      lastUpdate: ahora.toISOString(),
+      dniCuit: (cliente.dniCuit || '').toString().trim().slice(0, 40),
+      honorariosProgramados: '{}',
+      mesesAdeudados: 0,
+    };
+
+    this.db.prepare(`
+      INSERT INTO clientes (
+        id, nombre, telefono, honorario, honorarioPeriodo, totalAdeudado,
+        proximaFacturacion, fechaCreacion, tipoTrabajo, interesMensualActivo,
+        interesMensualPorcentaje, lastUpdate, dniCuit, honorariosProgramados,
+        mesesAdeudados
+      ) VALUES (
+        :id, :nombre, :telefono, :honorario, :honorarioPeriodo, :totalAdeudado,
+        :proximaFacturacion, :fechaCreacion, :tipoTrabajo, :interesMensualActivo,
+        :interesMensualPorcentaje, :lastUpdate, :dniCuit, :honorariosProgramados,
+        :mesesAdeudados
+      )
+    `).run(nuevo);
+
+    console.log(`✓ Cliente agregado: ${nuevo.nombre}`);
+    return this.getCliente(nuevo.id);
   }
 
   async updateCliente(id, updates) {
