@@ -1,0 +1,3 @@
+# Los .bat deben llegar siempre con finales de linea CRLF:
+# con LF, Windows puede fallar al interpretar etiquetas y saltos.
+*.bat text eol=crlf

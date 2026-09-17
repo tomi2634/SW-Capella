@@ -16,8 +16,8 @@ out/
 *.swp
 *.swo
 
-# Excluir archivo problemático de la subida inicial
-iniciar.bat
+# iniciar.bat SI se versiona: es el arranque del sistema y sin el
+# un clon nuevo no tiene como levantar la aplicacion.
 
 
 # Base de datos y respaldos: contienen la contabilidad real del estudio.
