@@ -400,89 +400,52 @@ class ExcelManager {
     return fila ? filaAPago(fila) : null;
   }
 
-  async updatePagoReciboMeta(pagoId, reciboData) {
-    try {
-      const { workbook, sheet } = await this._getPagosWorkbook();
-      this._ensurePagosSheetStructure(sheet);
-
-      let found = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.PAGO_COL.id).value === pagoId) {
-          row.getCell(this.PAGO_COL.reciboRelativePath).value = (reciboData?.relativePath || '').toString();
-          row.getCell(this.PAGO_COL.reciboFileName).value = (reciboData?.fileName || '').toString();
-          row.getCell(this.PAGO_COL.reciboNumero).value = Number.isInteger(reciboData?.numeroRecibo)
-            ? reciboData.numeroRecibo
-            : null;
-          if (!row.getCell(this.PAGO_COL.estado).value) {
-            row.getCell(this.PAGO_COL.estado).value = 'activo';
-          }
-          found = true;
-        }
-      });
-
-      if (!found) {
-        return null;
-      }
-
-      await workbook.xlsx.writeFile(this.pagosPath);
-      this._invalidateWorkbookCache('pagos');
-      return this.getPagoById(pagoId);
-    } catch (error) {
-      console.error('Error actualizando metadatos del recibo en pago:', error);
-      throw error;
-    }
-  }
-
   async anularPago(pagoId, motivo) {
-    try {
-      const { workbook, sheet } = await this._getPagosWorkbook();
-      this._ensurePagosSheetStructure(sheet);
+    const pago = this.db.prepare('SELECT clienteId FROM pagos WHERE id = ?').get(pagoId);
+    if (!pago) throw new Error('Pago no encontrado');
 
-      let pagoClienteId = null;
-      let found = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.PAGO_COL.id).value === pagoId) {
-          row.getCell(this.PAGO_COL.estado).value = 'anulado';
-          row.getCell(this.PAGO_COL.anuladoAt).value = new Date().toISOString();
-          row.getCell(this.PAGO_COL.anuladoMotivo).value = (motivo || '').toString().slice(0, 250);
-          row.getCell(this.PAGO_COL.timestamp).value = new Date().toISOString();
-          pagoClienteId = row.getCell(this.PAGO_COL.clienteId).value;
-          found = true;
-        }
-      });
+    const ahora = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE pagos SET estado = 'anulado', anuladoAt = ?, anuladoMotivo = ?, timestamp = ?
+      WHERE id = ?
+    `).run(ahora, (motivo || '').toString().slice(0, 250), ahora, pagoId);
 
-      if (!found) {
-        throw new Error('Pago no encontrado');
-      }
-
-      await workbook.xlsx.writeFile(this.pagosPath);
-      this._invalidateWorkbookCache('pagos');
-      if (pagoClienteId) {
-        await this.recalculateClienteDeuda(pagoClienteId);
-      }
-      return this.getPagoById(pagoId);
-    } catch (error) {
-      console.error('Error anulando pago:', error);
-      throw error;
+    if (pago.clienteId) {
+      await this.recalculateClienteDeuda(pago.clienteId);
     }
+    return this.getPagoById(pagoId);
   }
 
   async anularPagoPorReciboPath(reciboRelativePath, motivo) {
     const pathKey = (reciboRelativePath || '').toString().trim();
-    if (!pathKey) {
-      throw new Error('Ruta de recibo inválida');
-    }
+    if (!pathKey) throw new Error('Ruta de recibo inválida');
 
-    const pagos = await this.getAllPagos();
-    const pago = pagos.find((p) => (p.reciboRelativePath || '').toString().trim() === pathKey);
-
-    if (!pago) {
-      throw new Error('No se encontró un pago vinculado a ese recibo');
-    }
+    // Con idx_pagos_recibo esto es una búsqueda por índice, no un escaneo.
+    const pago = this.db.prepare(
+      'SELECT id FROM pagos WHERE TRIM(reciboRelativePath) = ?'
+    ).get(pathKey);
+    if (!pago) throw new Error('No se encontró un pago vinculado a ese recibo');
 
     return this.anularPago(pago.id, motivo);
+  }
+
+  async updatePagoReciboMeta(pagoId, reciboData) {
+    const { changes } = this.db.prepare(`
+      UPDATE pagos SET
+        reciboRelativePath = :relativePath,
+        reciboFileName = :fileName,
+        reciboNumero = :numeroRecibo,
+        estado = CASE WHEN estado IS NULL OR estado = '' THEN 'activo' ELSE estado END
+      WHERE id = :id
+    `).run({
+      id: pagoId,
+      relativePath: (reciboData?.relativePath || '').toString(),
+      fileName: (reciboData?.fileName || '').toString(),
+      numeroRecibo: Number.isInteger(reciboData?.numeroRecibo) ? reciboData.numeroRecibo : null,
+    });
+
+    if (changes === 0) return null;
+    return this.getPagoById(pagoId);
   }
 
   // Recalcular deuda del cliente basado en facturación cada 30 días

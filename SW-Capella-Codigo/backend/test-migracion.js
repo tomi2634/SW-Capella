@@ -377,6 +377,51 @@ prueba('registrarPagoYRecalcular revierte todo si el recalculo falla', async () 
     'el pago no debe haber quedado guardado');
 });
 
+prueba('anularPago marca el estado y recalcula la deuda', async () => {
+  const em = await managerConCliente();
+  await em.envejecerCliente('c1', 100);
+  await em.addPago({ id: 'p1', clienteId: 'c1', monto: 15000, estado: 'activo' });
+  await em.recalculateClienteDeuda('c1');
+  const deudaConPago = (await em.getCliente('c1')).totalAdeudado;
+
+  const anulado = await em.anularPago('p1', 'error de carga');
+  assert.strictEqual(anulado.estado, 'anulado');
+  assert.strictEqual(anulado.anuladoMotivo, 'error de carga');
+  assert.ok(anulado.anuladoAt !== '', 'debe registrar cuando se anulo');
+  assert.strictEqual(
+    (await em.getCliente('c1')).totalAdeudado,
+    Math.round((deudaConPago + 15000) * 100) / 100,
+    'anular devuelve la deuda'
+  );
+});
+
+prueba('anularPago tira si el pago no existe', async () => {
+  const em = await managerConCliente();
+  await assert.rejects(() => em.anularPago('fantasma', 'x'), /Pago no encontrado/);
+});
+
+prueba('anularPagoPorReciboPath encuentra el pago por su ruta', async () => {
+  const em = await managerConCliente();
+  await em.addPago({ id: 'p1', clienteId: 'c1', monto: 15000, estado: 'activo' });
+  await em.updatePagoReciboMeta('p1', {
+    relativePath: 'Honorarios Estudio Capella/Tomas/Recibo 1.pdf',
+    fileName: 'Recibo 1.pdf', numeroRecibo: 1,
+  });
+  const anulado = await em.anularPagoPorReciboPath(
+    'Honorarios Estudio Capella/Tomas/Recibo 1.pdf', 'anulado por el estudio'
+  );
+  assert.strictEqual(anulado.id, 'p1');
+  assert.strictEqual(anulado.estado, 'anulado');
+});
+
+prueba('updatePagoReciboMeta devuelve null si el pago no existe', async () => {
+  const em = await managerConCliente();
+  assert.strictEqual(
+    await em.updatePagoReciboMeta('fantasma', { relativePath: 'x', fileName: 'y', numeroRecibo: 1 }),
+    null
+  );
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;
