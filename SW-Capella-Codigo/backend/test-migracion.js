@@ -150,6 +150,47 @@ prueba('addCliente no tarda 200ms artificiales', async () => {
   assert.ok(Date.now() - t0 < 100, 'el sleep de verificacion debe haber desaparecido');
 });
 
+prueba('updateCliente modifica solo los campos enviados', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Original', telefono: '111', honorario: 10000 });
+  await em.updateCliente('c1', { telefono: '222' });
+  const cliente = await em.getCliente('c1');
+  assert.strictEqual(cliente.telefono, '222');
+  assert.strictEqual(cliente.nombre, 'Original', 'no debe tocar lo no enviado');
+  assert.strictEqual(cliente.honorario, 10000);
+});
+
+prueba('updateCliente tira si el cliente no existe', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await assert.rejects(() => em.updateCliente('fantasma', { telefono: '1' }),
+    /Cliente no encontrado/);
+});
+
+prueba('deleteCliente borra sus pagos en cascada', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Uno', honorario: 10000 });
+  em.db.prepare(
+    "INSERT INTO pagos (id, clienteId, monto) VALUES ('p1', 'c1', 5000)"
+  ).run();
+  await em.deleteCliente('c1');
+  assert.strictEqual(em.db.prepare('SELECT COUNT(*) n FROM pagos').get().n, 0,
+    'el ON DELETE CASCADE debe haber borrado el pago');
+  assert.strictEqual(await em.getCliente('c1'), undefined);
+});
+
+prueba('envejecerCliente retrocede la fecha de creacion', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Uno', honorario: 10000 });
+  await em.envejecerCliente('c1', 400);
+  const cliente = await em.getCliente('c1');
+  const dias = (Date.now() - new Date(cliente.fechaCreacion)) / 86400000;
+  assert.ok(dias > 399 && dias < 401, `esperaba ~400 dias, dio ${dias}`);
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;

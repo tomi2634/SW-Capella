@@ -202,85 +202,66 @@ class ExcelManager {
   }
 
   async updateCliente(id, updates) {
-    try {
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      const structureChanged = this._ensureClientesSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.clientesPath);
-      }
+    const actual = this.db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
+    if (!actual) throw new Error('Cliente no encontrado');
 
-      let found = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.CLIENTE_COL.id).value === id) {
-          if (updates.nombre !== undefined) row.getCell(this.CLIENTE_COL.nombre).value = updates.nombre;
-          if (updates.telefono !== undefined) row.getCell(this.CLIENTE_COL.telefono).value = updates.telefono;
-          if (updates.dniCuit !== undefined) row.getCell(this.CLIENTE_COL.dniCuit).value = (updates.dniCuit || '').toString().trim().slice(0, 40);
-          if (updates.honorario !== undefined) {
-            // 1) Obtener el honorario anterior ANTES de modificarlo
-            const honorarioAnterior = Math.round((parseFloat(
-              row.getCell(this.CLIENTE_COL.honorario).value
-            ) || 0) * 100) / 100;
+    const campos = {};
 
-            const nuevoHonorario = Math.round((parseFloat(updates.honorario) || 0) * 100) / 100;
-
-            // 2) Preservar el honorario anterior para todos los meses históricos
-            //    que aún no tengan un valor programado explícito.
-            const honorariosProgramados = this._safeJsonParseObject(
-              row.getCell(this.CLIENTE_COL.honorariosProgramados).value,
-              {}
-            );
-            const fechaCreacion = row.getCell(this.CLIENTE_COL.fechaCreacion).value;
-            this._preservarHonorariosAnteriores(honorariosProgramados, honorarioAnterior, fechaCreacion);
-
-            // 3) Guardar el nuevo honorario para el mes actual
-            honorariosProgramados[this.getCurrentMonthKey()] = nuevoHonorario;
-            row.getCell(this.CLIENTE_COL.honorariosProgramados).value = JSON.stringify(
-              this._sanitizeHonorariosProgramados(honorariosProgramados)
-            );
-
-            row.getCell(this.CLIENTE_COL.honorario).value = nuevoHonorario;
-          }
-
-          if (updates.tipoTrabajo !== undefined) {
-            const tipoTrabajo = updates.tipoTrabajo === 'particular' ? 'particular' : 'honorarios';
-            row.getCell(this.CLIENTE_COL.tipoTrabajo).value = tipoTrabajo;
-            if (tipoTrabajo === 'particular') {
-              row.getCell(this.CLIENTE_COL.proximaFacturacion).value = '';
-            } else if (!row.getCell(this.CLIENTE_COL.proximaFacturacion).value) {
-              const proximaFacturacion = new Date();
-              proximaFacturacion.setDate(proximaFacturacion.getDate() + 30);
-              row.getCell(this.CLIENTE_COL.proximaFacturacion).value = proximaFacturacion.toISOString();
-            }
-          }
-
-          if (updates.interesMensualActivo !== undefined) {
-            row.getCell(this.CLIENTE_COL.interesMensualActivo).value = Boolean(updates.interesMensualActivo);
-          }
-
-          if (updates.interesMensualPorcentaje !== undefined) {
-            row.getCell(this.CLIENTE_COL.interesMensualPorcentaje).value = Number(updates.interesMensualPorcentaje) || 0;
-          }
-
-          if (updates.honorariosProgramados !== undefined) {
-            const cleanProgramados = this._sanitizeHonorariosProgramados(updates.honorariosProgramados);
-            row.getCell(this.CLIENTE_COL.honorariosProgramados).value = JSON.stringify(cleanProgramados);
-          }
-
-          row.getCell(this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
-          found = true;
-        }
-      });
-
-      if (!found) throw new Error('Cliente no encontrado');
-
-      await workbook.xlsx.writeFile(this.clientesPath);
-      await this.recalculateClienteDeuda(id);
-      return this.getCliente(id);
-    } catch (error) {
-      console.error('Error actualizando cliente:', error);
-      throw error;
+    if (updates.nombre !== undefined) campos.nombre = updates.nombre;
+    if (updates.telefono !== undefined) campos.telefono = updates.telefono;
+    if (updates.dniCuit !== undefined) {
+      campos.dniCuit = (updates.dniCuit || '').toString().trim().slice(0, 40);
     }
+
+    if (updates.honorario !== undefined) {
+      // 1) honorario anterior ANTES de modificarlo
+      const honorarioAnterior = Math.round((parseFloat(actual.honorario) || 0) * 100) / 100;
+      const nuevoHonorario = Math.round((parseFloat(updates.honorario) || 0) * 100) / 100;
+
+      // 2) preservar el honorario anterior en los meses históricos sin valor propio
+      const programados = parseJsonObjeto(actual.honorariosProgramados, {});
+      this._preservarHonorariosAnteriores(programados, honorarioAnterior, actual.fechaCreacion);
+
+      // 3) el nuevo honorario rige desde el mes actual
+      programados[this.getCurrentMonthKey()] = nuevoHonorario;
+      campos.honorariosProgramados = JSON.stringify(
+        this._sanitizeHonorariosProgramados(programados)
+      );
+      campos.honorario = nuevoHonorario;
+    }
+
+    if (updates.tipoTrabajo !== undefined) {
+      const tipoTrabajo = updates.tipoTrabajo === 'particular' ? 'particular' : 'honorarios';
+      campos.tipoTrabajo = tipoTrabajo;
+      if (tipoTrabajo === 'particular') {
+        campos.proximaFacturacion = '';
+      } else if (!actual.proximaFacturacion) {
+        const proxima = new Date();
+        proxima.setDate(proxima.getDate() + 30);
+        campos.proximaFacturacion = proxima.toISOString();
+      }
+    }
+
+    if (updates.interesMensualActivo !== undefined) {
+      campos.interesMensualActivo = updates.interesMensualActivo ? 1 : 0;
+    }
+    if (updates.interesMensualPorcentaje !== undefined) {
+      campos.interesMensualPorcentaje = Number(updates.interesMensualPorcentaje) || 0;
+    }
+    if (updates.honorariosProgramados !== undefined) {
+      campos.honorariosProgramados = JSON.stringify(
+        this._sanitizeHonorariosProgramados(updates.honorariosProgramados)
+      );
+    }
+
+    campos.lastUpdate = new Date().toISOString();
+
+    const asignaciones = Object.keys(campos).map((c) => `${c} = :${c}`).join(', ');
+    this.db.prepare(`UPDATE clientes SET ${asignaciones} WHERE id = :id`)
+      .run({ ...campos, id });
+
+    await this.recalculateClienteDeuda(id);
+    return this.getCliente(id);
   }
 
   _preservarHonorariosAnteriores(honorariosProgramados, honorarioAnterior, fechaCreacion) {
@@ -409,85 +390,14 @@ class ExcelManager {
   }
 
   async deleteCliente(id) {
-    try {
-      console.log(`🗑️ INICIO: Eliminando cliente con ID: ${id}`);
-      
-      // Obtener datos del cliente antes de eliminar
-      const cliente = await this.getCliente(id);
-      if (!cliente) {
-        throw new Error('Cliente no encontrado');
-      }
+    const cliente = await this.getCliente(id);
+    if (!cliente) throw new Error('Cliente no encontrado');
 
-      // Eliminar del archivo de clientes
-      const { workbook: clientesWorkbook, sheet: clientesSheet } = await this._getClientesWorkbook();
+    // pagos e historial se van solos por ON DELETE CASCADE.
+    this.db.prepare('DELETE FROM clientes WHERE id = ?').run(id);
 
-      let rowToDelete = null;
-      clientesSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(1).value === id) {
-          rowToDelete = rowNumber;
-        }
-      });
-
-      if (rowToDelete) {
-        clientesSheet.spliceRows(rowToDelete, 1);
-        console.log(`✓ Cliente ${cliente.nombre} eliminado del archivo de clientes`);
-      }
-
-      await clientesWorkbook.xlsx.writeFile(this.clientesPath);
-      this._invalidateWorkbookCache('clientes');
-
-      // Eliminar todos los pagos asociados del archivo de pagos
-      const { workbook: pagosWorkbook, sheet: pagosSheet } = await this._getPagosWorkbook();
-
-      let rowsToDelete = [];
-      pagosSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(2).value === id) {
-          rowsToDelete.push(rowNumber);
-        }
-      });
-
-      // Eliminar en orden inverso para no afectar los índices
-      for (let i = rowsToDelete.length - 1; i >= 0; i--) {
-        pagosSheet.spliceRows(rowsToDelete[i], 1);
-      }
-
-      if (rowsToDelete.length > 0) {
-        console.log(`✓ ${rowsToDelete.length} pago(s) del cliente eliminado(s)`);
-      }
-
-      await pagosWorkbook.xlsx.writeFile(this.pagosPath);
-      this._invalidateWorkbookCache('pagos');
-
-      // Eliminar del historial
-      const { workbook: historicalWorkbook, sheet: historicalSheet } = await this._getHistorialWorkbook();
-
-      let histRowsToDelete = [];
-      historicalSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(2).value === id) {
-          histRowsToDelete.push(rowNumber);
-        }
-      });
-
-      for (let i = histRowsToDelete.length - 1; i >= 0; i--) {
-        historicalSheet.spliceRows(histRowsToDelete[i], 1);
-      }
-
-      if (histRowsToDelete.length > 0) {
-        console.log(`✓ ${histRowsToDelete.length} registro(s) del historial eliminado(s)`);
-      }
-
-      await historicalWorkbook.xlsx.writeFile(this.historicalPath);
-      this._invalidateWorkbookCache('historial');
-
-      console.log(`✅ Cliente ${cliente.nombre} y todos sus registros eliminados completamente`);
-      return { success: true, message: `Cliente ${cliente.nombre} eliminado completamente` };
-    } catch (error) {
-      console.error('❌ Error eliminando cliente:', error.message);
-      throw error;
-    }
+    console.log(`✅ Cliente ${cliente.nombre} y todos sus registros eliminados`);
+    return { success: true, message: `Cliente ${cliente.nombre} eliminado completamente` };
   }
 
   // ==================== PAGOS ====================
@@ -1180,29 +1090,14 @@ class ExcelManager {
 
   // Para testing: envejecer un cliente (cambiar su fecha de creación)
   async envejecerCliente(clienteId, diasAtras) {
-    const { workbook, sheet: worksheet } = await this._getClientesWorkbook();
-
-    let rowNum = null;
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber > 1 && row.getCell(this.CLIENTE_COL.id).value == clienteId) {
-        rowNum = rowNumber;
-      }
-    });
-
-    if (!rowNum) {
-      throw new Error('Cliente no encontrado');
-    }
-
-    // Calcular nueva fecha: diasAtras hacia el pasado
-    const ahora = new Date();
-    const nuevaFecha = new Date(ahora);
+    const nuevaFecha = new Date();
     nuevaFecha.setDate(nuevaFecha.getDate() - diasAtras);
 
-    worksheet.getCell(rowNum, this.CLIENTE_COL.fechaCreacion).value = nuevaFecha.toISOString();
-    worksheet.getCell(rowNum, this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
+    const { changes } = this.db.prepare(
+      'UPDATE clientes SET fechaCreacion = ?, lastUpdate = ? WHERE id = ?'
+    ).run(nuevaFecha.toISOString(), new Date().toISOString(), clienteId);
 
-    await workbook.xlsx.writeFile(this.clientesPath);
-    this._invalidateWorkbookCache('clientes');
+    if (changes === 0) throw new Error('Cliente no encontrado');
   }
 }
 
