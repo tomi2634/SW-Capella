@@ -281,112 +281,56 @@ class ExcelManager {
     return honorariosProgramados;
   }
 
+  // Helper interno: lee honorariosProgramados de un cliente, aplica una
+  // mutación sobre el objeto y lo vuelve a guardar sanitizado.
+  _mutarProgramados(id, mutar) {
+    const actual = this.db.prepare(
+      'SELECT honorario, fechaCreacion, honorariosProgramados FROM clientes WHERE id = ?'
+    ).get(id);
+    if (!actual) throw new Error('Cliente no encontrado');
+
+    const programados = parseJsonObjeto(actual.honorariosProgramados, {});
+    const campos = mutar(programados, actual) || {};
+
+    this.db.prepare(`
+      UPDATE clientes
+         SET honorariosProgramados = :programados,
+             honorario = COALESCE(:honorario, honorario),
+             lastUpdate = :lastUpdate
+       WHERE id = :id
+    `).run({
+      id,
+      programados: JSON.stringify(this._sanitizeHonorariosProgramados(programados)),
+      honorario: campos.honorario ?? null,
+      lastUpdate: new Date().toISOString(),
+    });
+  }
+
   async updateClienteHonorario(id, honorario) {
-    try {
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      const structureChanged = this._ensureClientesSheetStructure(sheet);
-      if (structureChanged) {
-        await workbook.xlsx.writeFile(this.clientesPath);
-      }
+    const nuevoHonorario = Math.round((parseFloat(honorario) || 0) * 100) / 100;
 
-      let found = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.CLIENTE_COL.id).value === id) {
-          // 1) Obtener el honorario anterior ANTES de modificarlo
-          const honorarioAnterior = Math.round((parseFloat(
-            row.getCell(this.CLIENTE_COL.honorario).value
-          ) || 0) * 100) / 100;
+    this._mutarProgramados(id, (programados, actual) => {
+      const honorarioAnterior = Math.round((parseFloat(actual.honorario) || 0) * 100) / 100;
+      this._preservarHonorariosAnteriores(programados, honorarioAnterior, actual.fechaCreacion);
+      programados[this.getCurrentMonthKey()] = nuevoHonorario;
+      return { honorario: nuevoHonorario };
+    });
 
-          const nuevoHonorario = Math.round((parseFloat(honorario) || 0) * 100) / 100;
-
-          // 2) Preservar el honorario anterior para todos los meses históricos
-          //    que aún no tengan un valor programado explícito.
-          const honorariosProgramados = this._safeJsonParseObject(
-            row.getCell(this.CLIENTE_COL.honorariosProgramados).value,
-            {}
-          );
-          const fechaCreacion = row.getCell(this.CLIENTE_COL.fechaCreacion).value;
-          this._preservarHonorariosAnteriores(honorariosProgramados, honorarioAnterior, fechaCreacion);
-
-          // 3) Guardar el nuevo honorario para el mes próximo
-          honorariosProgramados[this.getNextMonthKey()] = nuevoHonorario;
-          row.getCell(this.CLIENTE_COL.honorariosProgramados).value = JSON.stringify(
-            this._sanitizeHonorariosProgramados(honorariosProgramados)
-          );
-
-          // 4) Actualizar el honorario base
-          row.getCell(this.CLIENTE_COL.honorario).value = nuevoHonorario;
-
-          row.getCell(this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
-          console.log(`💰 Honorario actualizado para cliente ${id}: $${nuevoHonorario}`);
-          console.log(`   ℹ️ Honorario anterior preservado para meses históricos: $${honorarioAnterior}`);
-          console.log(`   ℹ️ Nuevo honorario aplicará a partir del mes siguiente (${this.getNextMonthKey()})`);
-          found = true;
-        }
-      });
-
-      if (!found) throw new Error('Cliente no encontrado');
-
-      await workbook.xlsx.writeFile(this.clientesPath);
-
-      // Recalcular deuda con el nuevo honorario para futuros períodos
-      await this.recalculateClienteDeuda(id);
-
-      return this.getCliente(id);
-    } catch (error) {
-      console.error('Error actualizando honorario:', error);
-      throw error;
-    }
+    await this.recalculateClienteDeuda(id);
+    return this.getCliente(id);
   }
 
   async updateClienteHonorarioProgramado(id, periodoMes, honorario) {
-    try {
-      const mesKey = this.normalizeMonthKey(periodoMes);
-      if (!mesKey) {
-        throw new Error('Período inválido. Use formato MM-YYYY');
-      }
+    const mesKey = this.normalizeMonthKey(periodoMes);
+    if (!mesKey) throw new Error('Período inválido, se espera MM-YYYY');
+    const monto = Math.round((parseFloat(honorario) || 0) * 100) / 100;
 
-      const nuevoHonorario = parseFloat(honorario);
-      if (!Number.isFinite(nuevoHonorario) || nuevoHonorario < 0) {
-        throw new Error('Honorario inválido');
-      }
-      const honorarioFinal = Math.round(nuevoHonorario * 100) / 100;
+    this._mutarProgramados(id, (programados) => {
+      programados[mesKey] = monto;
+    });
 
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      this._ensureClientesSheetStructure(sheet);
-
-      let found = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.CLIENTE_COL.id).value === id) {
-          const honorariosProgramados = this._safeJsonParseObject(
-            row.getCell(this.CLIENTE_COL.honorariosProgramados).value,
-            {}
-          );
-          honorariosProgramados[mesKey] = honorarioFinal;
-          row.getCell(this.CLIENTE_COL.honorariosProgramados).value = JSON.stringify(
-            this._sanitizeHonorariosProgramados(honorariosProgramados)
-          );
-
-          if (mesKey === this.getCurrentMonthKey()) {
-            row.getCell(this.CLIENTE_COL.honorario).value = honorarioFinal;
-          }
-
-          row.getCell(this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
-          found = true;
-        }
-      });
-
-      if (!found) throw new Error('Cliente no encontrado');
-
-      await workbook.xlsx.writeFile(this.clientesPath);
-      await this.recalculateClienteDeuda(id);
-      return this.getCliente(id);
-    } catch (error) {
-      console.error('Error actualizando honorario programado:', error);
-      throw error;
-    }
+    await this.recalculateClienteDeuda(id);
+    return this.getCliente(id);
   }
 
   async deleteCliente(id) {
@@ -720,75 +664,64 @@ class ExcelManager {
   }
 
   async addClienteDeudaAnterior(id, periodoMes, deuda) {
-    try {
-      const mesKey = this.normalizeMonthKey(periodoMes);
-      if (!mesKey) {
-        throw new Error('Período inválido. Use formato MM-YYYY');
-      }
+    const mesKey = this.normalizeMonthKey(periodoMes);
+    if (!mesKey) throw new Error('Período inválido. Use formato MM-YYYY');
 
-      const deudaFloat = parseFloat(deuda);
-      if (!Number.isFinite(deudaFloat) || deudaFloat < 0) {
-        throw new Error('Deuda inválida');
-      }
-      const deudaFinal = Math.round(deudaFloat * 100) / 100;
-
-      const { workbook, sheet } = await this._getClientesWorkbook();
-      this._ensureClientesSheetStructure(sheet);
-
-      let found = false;
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        if (row.getCell(this.CLIENTE_COL.id).value !== id) return;
-
-        const tipoTrabajo = (row.getCell(this.CLIENTE_COL.tipoTrabajo).value || 'honorarios').toString();
-        if (tipoTrabajo === 'particular') {
-          throw new Error('Solo se puede cargar deuda anterior en clientes de honorarios mensuales');
-        }
-
-        const honorariosProgramados = this._sanitizeHonorariosProgramados(
-          this._safeJsonParseObject(row.getCell(this.CLIENTE_COL.honorariosProgramados).value, {})
-        );
-
-        const fechaCreacionActual = this._monthFloorDate(row.getCell(this.CLIENTE_COL.fechaCreacion).value);
-        const fechaPeriodoObjetivo = this._monthKeyToDate(mesKey);
-
-        if (!fechaPeriodoObjetivo) {
-          throw new Error('Período inválido. Use formato MM-YYYY');
-        }
-
-        // Si el período objetivo es anterior al alta, se retrocede la fecha de creación
-        // y se completa con 0 los meses intermedios para no crear deudas ficticias.
-        if (fechaPeriodoObjetivo < fechaCreacionActual) {
-          const mesAnteriorAlta = new Date(fechaCreacionActual.getFullYear(), fechaCreacionActual.getMonth() - 1, 1);
-          const mesesIntermedios = this._buildMonthRange(fechaPeriodoObjetivo, mesAnteriorAlta);
-          mesesIntermedios.forEach((monthKey) => {
-            if (honorariosProgramados[monthKey] === undefined) {
-              honorariosProgramados[monthKey] = 0;
-            }
-          });
-          row.getCell(this.CLIENTE_COL.fechaCreacion).value = fechaPeriodoObjetivo.toISOString();
-        }
-
-        honorariosProgramados[mesKey] = deudaFinal;
-        row.getCell(this.CLIENTE_COL.honorariosProgramados).value = JSON.stringify(
-          this._sanitizeHonorariosProgramados(honorariosProgramados)
-        );
-        row.getCell(this.CLIENTE_COL.lastUpdate).value = new Date().toISOString();
-        found = true;
-      });
-
-      if (!found) {
-        throw new Error('Cliente no encontrado');
-      }
-
-      await workbook.xlsx.writeFile(this.clientesPath);
-      this._invalidateWorkbookCache('clientes');
-      await this.recalculateClienteDeuda(id);
-      return this.getCliente(id);
-    } catch (error) {
-      console.error('Error cargando deuda anterior:', error);
-      throw error;
+    const deudaFloat = parseFloat(deuda);
+    if (!Number.isFinite(deudaFloat) || deudaFloat < 0) {
+      throw new Error('Deuda inválida');
     }
+    const deudaFinal = Math.round(deudaFloat * 100) / 100;
+
+    const actual = this.db.prepare(
+      'SELECT tipoTrabajo, fechaCreacion, honorariosProgramados FROM clientes WHERE id = ?'
+    ).get(id);
+    if (!actual) throw new Error('Cliente no encontrado');
+
+    if ((actual.tipoTrabajo || 'honorarios').toString() === 'particular') {
+      throw new Error('Solo se puede cargar deuda anterior en clientes de honorarios mensuales');
+    }
+
+    const programados = this._sanitizeHonorariosProgramados(
+      parseJsonObjeto(actual.honorariosProgramados, {})
+    );
+
+    const fechaCreacionActual = this._monthFloorDate(actual.fechaCreacion);
+    const fechaPeriodoObjetivo = this._monthKeyToDate(mesKey);
+    if (!fechaPeriodoObjetivo) throw new Error('Período inválido. Use formato MM-YYYY');
+
+    const campos = { fechaCreacion: null };
+
+    // Si el período objetivo es anterior al alta, se retrocede la fecha de creación
+    // y se completa con 0 los meses intermedios para no crear deudas ficticias.
+    if (fechaPeriodoObjetivo < fechaCreacionActual) {
+      const mesAnteriorAlta = new Date(
+        fechaCreacionActual.getFullYear(), fechaCreacionActual.getMonth() - 1, 1
+      );
+      const mesesIntermedios = this._buildMonthRange(fechaPeriodoObjetivo, mesAnteriorAlta);
+      mesesIntermedios.forEach((monthKey) => {
+        if (programados[monthKey] === undefined) programados[monthKey] = 0;
+      });
+      campos.fechaCreacion = fechaPeriodoObjetivo.toISOString();
+    }
+
+    programados[mesKey] = deudaFinal;
+
+    this.db.prepare(`
+      UPDATE clientes SET
+        honorariosProgramados = :programados,
+        fechaCreacion = COALESCE(:fechaCreacion, fechaCreacion),
+        lastUpdate = :lastUpdate
+      WHERE id = :id
+    `).run({
+      id,
+      programados: JSON.stringify(this._sanitizeHonorariosProgramados(programados)),
+      fechaCreacion: campos.fechaCreacion,
+      lastUpdate: new Date().toISOString(),
+    });
+
+    await this.recalculateClienteDeuda(id);
+    return this.getCliente(id);
   }
 
   // Función centralizada que calcula TODA la información financiera del cliente

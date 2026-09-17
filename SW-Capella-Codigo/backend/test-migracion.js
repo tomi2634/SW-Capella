@@ -191,6 +191,85 @@ prueba('envejecerCliente retrocede la fecha de creacion', async () => {
   assert.ok(dias > 399 && dias < 401, `esperaba ~400 dias, dio ${dias}`);
 });
 
+prueba('updateClienteHonorario preserva el honorario viejo en meses pasados', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Uno', honorario: 10000 });
+  await em.envejecerCliente('c1', 100);           // ~3 meses de historia
+  await em.updateClienteHonorario('c1', 20000);
+
+  const cliente = await em.getCliente('c1');
+  const programados = cliente.honorariosProgramados;
+  const mesActual = em.getCurrentMonthKey();
+
+  assert.strictEqual(programados[mesActual], 20000, 'el mes actual usa el nuevo');
+  const mesesViejos = Object.keys(programados).filter((m) => m !== mesActual);
+  assert.ok(mesesViejos.length > 0, 'debe haber preservado meses anteriores');
+  for (const mes of mesesViejos) {
+    assert.strictEqual(programados[mes], 10000, `${mes} debe conservar el viejo`);
+  }
+});
+
+prueba('updateClienteHonorarioProgramado pisa un solo mes', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Uno', honorario: 10000 });
+  await em.updateClienteHonorarioProgramado('c1', '03-2025', 7777);
+  const cliente = await em.getCliente('c1');
+  assert.strictEqual(cliente.honorariosProgramados['03-2025'], 7777);
+  assert.strictEqual(cliente.honorario, 10000, 'el honorario base no cambia');
+});
+
+prueba('addClienteDeudaAnterior reemplaza el mes, no lo suma', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Uno', honorario: 10000 });
+  await em.envejecerCliente('c1', 200);
+  await em.updateClienteHonorarioProgramado('c1', '03-2025', 5000);
+  await em.addClienteDeudaAnterior('c1', '03-2025', 8000);
+  const cliente = await em.getCliente('c1');
+  assert.strictEqual(cliente.honorariosProgramados['03-2025'], 8000,
+    'debe reemplazar, no sumar a los 5000 previos');
+});
+
+prueba('addClienteDeudaAnterior rechaza clientes particulares', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({
+    id: 'c1', nombre: 'Unico', honorario: 50000, tipoTrabajo: 'particular',
+  });
+  await assert.rejects(() => em.addClienteDeudaAnterior('c1', '03-2025', 1000),
+    /honorarios mensuales/);
+});
+
+prueba('addClienteDeudaAnterior retrocede el alta y rellena con 0', async () => {
+  const em = nuevoManager();
+  await em.initialize();
+  await em.addCliente({ id: 'c1', nombre: 'Uno', honorario: 10000 });
+  await em.envejecerCliente('c1', 60);                  // alta ~2 meses atrás
+  const altaPrevia = new Date((await em.getCliente('c1')).fechaCreacion);
+
+  // Un período bastante anterior al alta.
+  const objetivo = new Date(altaPrevia.getFullYear(), altaPrevia.getMonth() - 3, 1);
+  const mesObjetivo = em.formatearMes(objetivo);
+  await em.addClienteDeudaAnterior('c1', mesObjetivo, 4500);
+
+  const cliente = await em.getCliente('c1');
+  assert.ok(new Date(cliente.fechaCreacion) < altaPrevia,
+    'el alta debe haber retrocedido hasta el periodo objetivo');
+  assert.strictEqual(cliente.honorariosProgramados[mesObjetivo], 4500);
+
+  // Los meses entre el objetivo y el alta original deben quedar en 0,
+  // no en el honorario base, para no inventar deuda.
+  const mesAnteriorAlta = new Date(altaPrevia.getFullYear(), altaPrevia.getMonth() - 1, 1);
+  const intermedios = em._buildMonthRange(objetivo, mesAnteriorAlta)
+    .filter((m) => m !== mesObjetivo);
+  for (const mes of intermedios) {
+    assert.strictEqual(cliente.honorariosProgramados[mes], 0,
+      `${mes} debe quedar en 0 y no generar deuda ficticia`);
+  }
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;
