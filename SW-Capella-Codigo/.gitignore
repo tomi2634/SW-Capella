@@ -19,3 +19,12 @@ out/
 # Excluir archivo problemático de la subida inicial
 iniciar.bat
 
+
+# Base de datos y respaldos: contienen la contabilidad real del estudio.
+# Nunca deben subirse al repositorio.
+data/
+backups/
+*.xlsx
+*.db
+*.db-wal
+*.db-shm

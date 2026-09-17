@@ -1,0 +1,16 @@
+# Documentacion interna que no se publica en GitHub.
+CONTEXTO_PROYECTO_IA.md
+docs/runbook-cutover-sqlite.md
+
+# Herramientas locales del entorno de desarrollo.
+.claude/
+graphify-out/
+
+# Datos reales del estudio: nunca al repositorio.
+# (SW-Capella-Codigo/.gitignore tambien los cubre; esto es una segunda red.)
+**/data/
+**/backups/
+*.xlsx
+*.db
+*.db-wal
+*.db-shm
