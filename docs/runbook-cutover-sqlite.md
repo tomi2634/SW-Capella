@@ -161,16 +161,34 @@ npm install
 
 ## Paso 4 — Probar que el código funciona, antes de tocar los datos
 
+**Primero, confirmá que las dependencias están instaladas.** Si en el Paso 3 saltaste el
+`npm install` porque `backend\node_modules` no existía, hacelo ahora:
+
 ```
 cd SW-Capella-Codigo\backend
+dir node_modules\exceljs
+```
+
+Si dice que no existe, corré `npm install` antes de seguir. **No lo saltees ni cuando el paso
+siguiente dé bien** — la suite de pruebas de abajo no usa `exceljs`, así que puede pasar
+perfecto aunque falte instalar. El primer error real recién aparece en el Paso 5, cuando ya es
+tarde para darse cuenta a tiempo.
+
+Ahora sí, corré la suite:
+
+```
 node test-migracion.js
 ```
 
 **Tiene que terminar en `40/40 pruebas pasaron`.**
 
-Si da menos de 40, o aparece alguna línea que empieza con `FALLA`: **pará acá**. El código no está
-bien instalado o falta algún archivo. No sigas al Paso 5. Los datos todavía no se tocaron, así que
-no hay nada que revertir: volvé a copiar los archivos y probá de nuevo.
+Si da menos de 40, o aparece alguna línea que empieza con `FALLA`: **pará acá**. Falta algún
+archivo del código. No sigas al Paso 5. Los datos todavía no se tocaron, así que no hay nada que
+revertir: volvé a copiar los archivos y probá de nuevo.
+
+Si en el Paso 5 aparece `Cannot find module 'exceljs'` a pesar de haber pasado este paso: es
+justamente el caso de arriba, `npm install` nunca se corrió. No perdiste nada — el script revienta
+antes de tocar `data/` — así que corré `npm install` y volvé a intentar desde acá.
 
 ---
 
