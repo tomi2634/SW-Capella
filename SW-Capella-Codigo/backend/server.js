@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const { v4: uuidv4 } = require('uuid');
 const ExcelManager = require('./excelManager');
 const PDFGenerator = require('./pdfGenerator');
+const exportarHistorial = require('./exportarHistorial');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -981,8 +982,27 @@ app.get('/api/historial/cliente/:clienteId', async (req, res) => {
   }
 });
 
+// Exportar el historial de un cliente: ?formato=pdf | xlsx
+app.get('/api/historial/cliente/:clienteId/exportar', async (req, res) => {
+  try {
+    const formato = req.query.formato === 'xlsx' ? 'xlsx' : 'pdf';
+    const cliente = await excelManager.getCliente(req.params.clienteId);
+    if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    const historial = await excelManager.getHistorialCliente(cliente.id);
+    const buffer = formato === 'xlsx'
+      ? await exportarHistorial.generarExcel(cliente, historial)
+      : await exportarHistorial.generarPdf(cliente, historial, pdfGenerator.getLogoPath());
+
+    res.attachment(`Resumen ${sanitizeForFolderName(cliente.nombre)}.${formato}`);
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Obtener historial completo
-app.get('/api/historial', async (req, res) => {
+app.get('/api/historial',async (req, res) => {
   try {
     const historial = await excelManager.getAllHistorial();
     res.json(historial);

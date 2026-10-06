@@ -682,12 +682,24 @@ export default function ClientesTab({ clientes, onClienteCreated, onRefresh }) {
           <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <h3>📋 Historial de {showHistorial.nombreCliente}</h3>
-              <button 
-                className="btn btn-secondary"
-                onClick={() => setShowHistorial(null)}
-              >
-                ✕ Cerrar
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {historial.length > 0 && ['pdf', 'xlsx'].map((formato) => (
+                  <a
+                    key={formato}
+                    className="btn btn-primary"
+                    href={`${API_BASE_URL}/historial/cliente/${showHistorial.clienteId}/exportar?formato=${formato}`}
+                    download
+                  >
+                    ⬇ {formato === 'pdf' ? 'PDF' : 'Excel'}
+                  </a>
+                ))}
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowHistorial(null)}
+                >
+                  ✕ Cerrar
+                </button>
+              </div>
             </div>
 
             {loadingHistorial ? (
