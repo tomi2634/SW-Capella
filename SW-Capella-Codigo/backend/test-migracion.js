@@ -464,6 +464,25 @@ prueba('getResumen suma solo la deuda de los clientes que deben', async () => {
   assert.strictEqual(resumen.clientesPagoDia, 1);
 });
 
+prueba('exportar historial: orden cronologico, totales y archivos validos', async () => {
+  const { armarResumen, generarPdf, generarExcel } = require('./exportarHistorial');
+  const historial = [
+    { mes: '04-2026', deuda: 198000, montoPagado: 38595, deudaPendiente: 159405, estado: 'adeudado' },
+    { mes: '12-2025', deuda: 100, montoPagado: 100, deudaPendiente: 0, estado: 'pagado' },
+    { mes: '03-2026', deuda: 2736085, montoPagado: 2736085, deudaPendiente: 0, estado: 'pagado' },
+  ];
+  const r = armarResumen(historial);
+  assert.deepStrictEqual(r.filas.map((f) => f.mes), ['Diciembre 2025', 'Marzo 2026', 'Abril 2026']);
+  assert.strictEqual(r.totalPagado, 2774780);
+  assert.strictEqual(r.totalAdeudado, 159405);
+
+  const cliente = { nombre: 'Prueba S.R.L.', dniCuit: '30-1' };
+  const pdf = await generarPdf(cliente, historial, null);
+  assert.strictEqual(pdf.subarray(0, 5).toString(), '%PDF-');
+  const xlsx = Buffer.from(await generarExcel(cliente, historial));
+  assert.strictEqual(xlsx.subarray(0, 2).toString(), 'PK');
+});
+
 // --- runner ---
 (async () => {
   let fallos = 0;
