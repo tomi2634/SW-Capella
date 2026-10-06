@@ -754,16 +754,11 @@ export default function ClientesTab({ clientes, onClienteCreated, onRefresh }) {
             )}
 
             <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid rgba(165, 166, 146, 0.5)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                <p style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-accent)', fontSize: '14px' }}>
-                  Total Pagado: ${historial.reduce((sum, h) => sum + (parseFloat(h.montoPagado) || 0), 0).toFixed(2)}
-                </p>
-                <p style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-primary)', fontSize: '14px' }}>
-                  Total Adeudado: ${historial.reduce((sum, h) => sum + (parseFloat(h.deudaPendiente) || 0), 0).toFixed(2)}
-                </p>
-              </div>
-              <p style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '16px', color: 'var(--color-dark)', marginTop: '10px' }}>
-                Deuda Total: ${historial.reduce((sum, h) => sum + (parseFloat(h.deuda) || 0), 0).toFixed(2)}
+              <p style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-accent)', fontSize: '14px', marginBottom: '10px' }}>
+                Total Pagado: ${historial.reduce((sum, h) => sum + (parseFloat(h.montoPagado) || 0), 0).toFixed(2)}
+              </p>
+              <p style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-primary)', fontSize: '20px' }}>
+                Total Adeudado: ${historial.reduce((sum, h) => sum + (parseFloat(h.deudaPendiente) || 0), 0).toFixed(2)}
               </p>
             </div>
           </div>
